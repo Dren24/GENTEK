@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+
 import { Sun, Moon, List, X, Gear, SignOut, Gift, ChatCircle } from '@phosphor-icons/react'
 import { useDarkMode } from '../../hooks/useDarkMode'
 import { GentekWordmark } from './GentekLogo'
@@ -9,6 +10,7 @@ import { useAuth } from '../../context/AuthContext'
 /* ── User avatar dropdown ── */
 function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
   const initial = user?.name?.charAt(0).toUpperCase() || '?'
 
   return (
@@ -31,7 +33,10 @@ function UserMenu({ user, logout }) {
               <p className="text-xs font-semibold text-gray-800 dark:text-white truncate">{user?.name}</p>
               <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{user?.email}</p>
             </div>
-            <button className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+            <button
+              onClick={() => { navigate('/settings'); setOpen(false) }}
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
               <Gear size={14} />Settings
             </button>
             <button
@@ -104,7 +109,7 @@ export default function Navbar() {
 
   const handleTempStart = () => {
     setTempOpen(false)
-    navigate('/')
+    navigate('/', { state: { tempChat: true, newAnalysis: true } })
   }
 
   return (

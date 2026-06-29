@@ -321,7 +321,7 @@ function ResultsPanel({ analyzing, results, text, onApply, onApplyAll }) {
             <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800">
               <WarningCircle size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
               <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
-                Demo mode — mock NLP pattern matching. Full AI model coming soon.
+                Pattern-based detection. HuggingFace AI model integration coming soon.
               </p>
             </div>
           </div>
@@ -335,21 +335,30 @@ function ResultsPanel({ analyzing, results, text, onApply, onApplyAll }) {
 export default function HomePage() {
   const { user, addToHistory } = useAuth()
   const location = useLocation()
-  const [text, setText]       = useState('')
-  const [analyzing, setAna]   = useState(false)
-  const [results, setResults] = useState(null)
-  const textareaRef           = useRef(null)
+  const [text, setText]         = useState('')
+  const [analyzing, setAna]     = useState(false)
+  const [results, setResults]   = useState(null)
+  const [isTempSession, setTemp] = useState(false)
+  const textareaRef             = useRef(null)
 
   // Handle sidebar navigation state
   useEffect(() => {
-    if (location.state?.loadText) {
+    if (location.state?.tempChat) {
+      setText('')
+      setResults(null)
+      setTemp(true)
+      window.history.replaceState({}, '')
+      setTimeout(() => textareaRef.current?.focus(), 50)
+    } else if (location.state?.loadText) {
       setText(location.state.loadText)
       setResults(null)
+      setTemp(false)
       window.history.replaceState({}, '')
       setTimeout(() => textareaRef.current?.focus(), 50)
     } else if (location.state?.newAnalysis) {
       setText('')
       setResults(null)
+      setTemp(false)
       window.history.replaceState({}, '')
       setTimeout(() => textareaRef.current?.focus(), 50)
     }
@@ -359,16 +368,38 @@ export default function HomePage() {
   const charCount = text.length
   const showPanel = analyzing || results
 
-  const analyze = useCallback(() => {
+  const buildHtml = (text, detected) => {
+    let html = text
+    detected.forEach(({ word, type }) => {
+      const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
+      html = html.replace(new RegExp(`\\b${word.replace(/\s+/g, '\\s+')}\\b`, 'gi'), `<mark class="${cls}">${word}</mark>`)
+    })
+    return html
+  }
+
+  const analyze = useCallback(async () => {
     if (!text.trim() || wordCount < 3) return
     setAna(true); setResults(null)
-    setTimeout(() => {
+    try {
+      const res = await fetch('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!res.ok) throw new Error('API error')
+      const data = await res.json()
+      const r = { ...data, html: buildHtml(text, data.detected) }
+      setResults(r)
+      setAna(false)
+      if (user && !isTempSession) addToHistory(text, r)
+    } catch {
+      // Fallback to local analysis when backend is not running
       const r = runAnalysis(text)
       setResults(r)
       setAna(false)
-      if (user) addToHistory(text, r)
-    }, 1600)
-  }, [text, wordCount, user, addToHistory])
+      if (user && !isTempSession) addToHistory(text, r)
+    }
+  }, [text, wordCount, user, isTempSession, addToHistory])
 
   const loadSample = (key) => { setText(SAMPLES[key]); setResults(null); textareaRef.current?.focus() }
   const clear      = ()    => { setText(''); setResults(null); textareaRef.current?.focus() }
@@ -422,7 +453,24 @@ export default function HomePage() {
 
             {/* LEFT: Editor */}
             <div className={`transition-all duration-500 ${showPanel ? 'lg:w-[48%] flex-shrink-0' : 'w-full max-w-4xl'}`}>
-              <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-700/80 shadow-editor overflow-hidden">
+              <div className={`bg-white dark:bg-gray-900 rounded-3xl shadow-editor overflow-hidden border ${isTempSession ? 'border-dashed border-amber-400 dark:border-amber-500' : 'border-gray-200 dark:border-gray-700/80'}`}>
+
+                {/* Temp session banner */}
+                {isTempSession && (
+                  <div className="flex items-center justify-between gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+                      <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">Temporary session — results won't be saved to history</span>
+                    </div>
+                    <button
+                      onClick={() => setTemp(false)}
+                      title="Exit temporary session"
+                      className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors text-[10px] font-bold underline"
+                    >
+                      Exit
+                    </button>
+                  </div>
+                )}
 
                 {/* Top bar */}
                 <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60">

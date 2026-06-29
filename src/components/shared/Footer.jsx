@@ -33,24 +33,22 @@ export default function Footer() {
   if (user) return null
   return (
     <footer className="bg-gray-50 dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
-      {/* CTA strip — guests only */}
-      {!user && (
-        <div className="bg-brand-600 dark:bg-brand-700">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col md:flex-row items-center justify-between gap-5">
-            <div>
-              <p className="text-white font-bold text-xl mb-1">Start writing without bias.</p>
-              <p className="text-brand-200 text-sm">No account needed. Paste your text and get results instantly.</p>
-            </div>
-            <button
-              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              className="flex-shrink-0 inline-flex items-center gap-2 bg-white text-brand-700 font-bold rounded-xl px-6 py-3 text-sm hover:bg-brand-50 transition-colors shadow-lg active:scale-95"
-            >
-              Try GENTEK Free
-              <ArrowRight size={15} weight="bold" />
-            </button>
+      {/* CTA strip */}
+      <div className="bg-brand-600 dark:bg-brand-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col md:flex-row items-center justify-between gap-5">
+          <div>
+            <p className="text-white font-bold text-xl mb-1">Start writing without bias.</p>
+            <p className="text-brand-200 text-sm">No account needed. Paste your text and get results instantly.</p>
           </div>
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="flex-shrink-0 inline-flex items-center gap-2 bg-white text-brand-700 font-bold rounded-xl px-6 py-3 text-sm hover:bg-brand-50 transition-colors shadow-lg active:scale-95"
+          >
+            Try GENTEK Free
+            <ArrowRight size={15} weight="bold" />
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Main footer */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">

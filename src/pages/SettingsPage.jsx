@@ -36,7 +36,7 @@ function Row({ icon: Icon, label, desc, children }) {
 }
 
 export default function SettingsPage() {
-  const { user, logout } = useAuth()
+  const { user, logout, updateUser } = useAuth()
   const [dark, setDark]  = useDarkMode()
   const navigate         = useNavigate()
 
@@ -45,6 +45,8 @@ export default function SettingsPage() {
   const [notifications, setNotifications] = useState(true)
 
   const handleSave = () => {
+    const trimmed = name.trim()
+    if (trimmed) updateUser({ name: trimmed })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }

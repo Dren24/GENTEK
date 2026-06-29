@@ -46,6 +46,12 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('gentek-user')
   }
 
+  const updateUser = (updates) => {
+    const updated = { ...user, ...updates }
+    setUser(updated)
+    localStorage.setItem('gentek-user', JSON.stringify(updated))
+  }
+
   const addToHistory = (text, results) => {
     const item = {
       id:             Date.now(),
@@ -70,7 +76,7 @@ export function AuthProvider({ children }) {
   const historyWithGroups = history.map(h => ({ ...h, group: getGroup(h.timestamp) }))
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, history: historyWithGroups, addToHistory, sidebarOpen, toggleSidebar, pricingOpen, openPricing, closePricing }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser, history: historyWithGroups, addToHistory, sidebarOpen, toggleSidebar, pricingOpen, openPricing, closePricing }}>
       {children}
     </AuthContext.Provider>
   )

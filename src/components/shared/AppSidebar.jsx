@@ -143,7 +143,7 @@ function RecentPopup({ items, onClose, onSelect }) {
 }
 
 /* ── User popup (bottom) ── */
-function UserPopup({ user, logout, onClose }) {
+function UserPopup({ user, logout, onClose, onNavigate }) {
   const ref = useRef(null)
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
@@ -168,10 +168,10 @@ function UserPopup({ user, logout, onClose }) {
         </div>
       </div>
       <div className="p-1.5">
-        <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
+        <button onClick={() => { onNavigate('/settings'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
           <Gear size={14} />Settings
         </button>
-        <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
+        <button onClick={() => { onNavigate('/about'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
           <Question size={14} />Help
         </button>
         <button
@@ -432,7 +432,7 @@ export default function AppSidebar() {
                 <span className="text-xs font-bold text-white">{user?.name?.charAt(0).toUpperCase()}</span>
               </button>
               {activePopup === 'user' && (
-                <UserPopup user={user} logout={logout} onClose={() => setActivePopup(null)} />
+                <UserPopup user={user} logout={logout} onClose={() => setActivePopup(null)} onNavigate={go} />
               )}
             </div>
           </>

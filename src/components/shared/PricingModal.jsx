@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Check, ArrowRight, Lightning, Clock } from '@phosphor-icons/react'
 import { useAuth } from '../../context/AuthContext'
+import PaymentModal from './PaymentModal'
 
 const PERSONAL_PLANS = [
   {
@@ -141,7 +142,7 @@ const BUSINESS_PLANS = [
   },
 ]
 
-function PlanCard({ plan, annual }) {
+function PlanCard({ plan, annual, onUpgrade }) {
   const displayPrice = plan.customPrice
     ? null
     : annual && plan.price > 0
@@ -188,11 +189,28 @@ function PlanCard({ plan, annual }) {
       </div>
 
       {plan.ctaStyle === 'primary' ? (
-        <button className="w-full py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors mb-4">
+        <button
+          onClick={() => plan.price > 0 && onUpgrade(plan)}
+          className="w-full py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors mb-4"
+        >
           {plan.cta}
         </button>
+      ) : plan.id === 'free' ? (
+        <button className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-600 text-gray-400 cursor-default">
+          {plan.cta}
+        </button>
+      ) : plan.customPrice ? (
+        <a
+          href="mailto:support@gentek.ai"
+          className="block w-full py-2 rounded-xl text-sm font-semibold text-center transition-colors mb-4 border border-gray-600 text-gray-300 hover:bg-gray-700"
+        >
+          {plan.cta}
+        </a>
       ) : (
-        <button className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-600 text-gray-300 hover:bg-gray-700">
+        <button
+          onClick={() => onUpgrade(plan)}
+          className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-600 text-gray-300 hover:bg-gray-700"
+        >
           {plan.cta}
         </button>
       )}
@@ -211,8 +229,9 @@ function PlanCard({ plan, annual }) {
 
 export default function PricingModal() {
   const { pricingOpen, closePricing } = useAuth()
-  const [tab, setTab]     = useState('personal')
-  const [annual, setAnnual] = useState(false)
+  const [tab, setTab]         = useState('personal')
+  const [annual, setAnnual]   = useState(false)
+  const [paying, setPaying]   = useState(null)
 
   if (!pricingOpen) return null
 
@@ -290,7 +309,7 @@ export default function PricingModal() {
         <div className="px-6 pb-8">
           <div className={`grid gap-3 ${plans.length === 4 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-3'}`}>
             {plans.map(plan => (
-              <PlanCard key={plan.id} plan={plan} annual={annual} />
+              <PlanCard key={plan.id} plan={plan} annual={annual} onUpgrade={setPaying} />
             ))}
           </div>
         </div>
@@ -305,6 +324,11 @@ export default function PricingModal() {
           </p>
         </div>
       </div>
+
+      {/* Payment modal — renders on top of pricing modal */}
+      {paying && (
+        <PaymentModal plan={paying} onClose={() => setPaying(null)} />
+      )}
     </div>
   )
 }
