@@ -153,12 +153,12 @@ function PlanCard({ plan, annual, onUpgrade }) {
     <div className={`
       relative flex flex-col rounded-2xl p-5 transition-all
       ${plan.featured
-        ? 'bg-gray-750 border-2 border-blue-500 shadow-xl'
-        : 'bg-gray-800 border border-gray-700'}
-    `} style={plan.featured ? { background: '#1f2a37' } : { background: '#1a2130' }}>
+        ? 'bg-white dark:bg-gray-800 border-2 border-blue-500 shadow-xl'
+        : 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700'}
+    `}>
       {plan.badge && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="inline-flex items-center gap-1 bg-gray-600 text-gray-200 text-[10px] font-bold px-3 py-1 rounded-full tracking-wider whitespace-nowrap">
+          <span className="inline-flex items-center gap-1 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 text-[10px] font-bold px-3 py-1 rounded-full tracking-wider whitespace-nowrap">
             <Clock size={9} weight="fill" />
             {plan.badge}
           </span>
@@ -166,26 +166,26 @@ function PlanCard({ plan, annual, onUpgrade }) {
       )}
 
       <div className="mb-4">
-        <h3 className="text-base font-bold text-white mb-1">{plan.name}</h3>
+        <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">{plan.name}</h3>
 
         {plan.customPrice ? (
-          <p className="text-2xl font-extrabold text-white mb-1">Custom</p>
+          <p className="text-2xl font-extrabold text-gray-900 dark:text-white mb-1">Custom pricing</p>
         ) : (
           <div className="flex items-end gap-1 mb-0.5">
             {plan.originalPrice && (
-              <span className="text-base font-bold text-gray-500 line-through">₱{plan.originalPrice}</span>
+              <span className="text-base font-bold text-gray-400 dark:text-gray-500 line-through">₱{plan.originalPrice}</span>
             )}
-            <span className="text-3xl font-extrabold text-white">
+            <span className="text-3xl font-extrabold text-gray-900 dark:text-white">
               {plan.price === 0 ? '₱0' : `₱${displayPrice}`}
             </span>
-            <span className="text-gray-400 text-xs mb-1">{plan.price === 0 ? '/month' : plan.period}</span>
+            <span className="text-gray-400 dark:text-gray-400 text-xs mb-1">{plan.price === 0 ? '/month' : plan.period}</span>
           </div>
         )}
 
         {plan.promoNote && (
-          <p className="text-blue-400 text-[11px] font-semibold mb-0.5">{plan.promoNote}</p>
+          <p className="text-blue-600 dark:text-blue-400 text-[11px] font-semibold mb-0.5">{plan.promoNote}</p>
         )}
-        <p className="text-gray-400 text-xs leading-relaxed">{plan.desc}</p>
+        <p className="text-gray-500 dark:text-gray-400 text-xs leading-relaxed">{plan.desc}</p>
       </div>
 
       {plan.ctaStyle === 'primary' ? (
@@ -196,20 +196,20 @@ function PlanCard({ plan, annual, onUpgrade }) {
           {plan.cta}
         </button>
       ) : plan.id === 'free' ? (
-        <button className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-600 text-gray-400 cursor-default">
+        <button className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-200 dark:border-gray-600 text-gray-400 dark:text-gray-500 cursor-default">
           {plan.cta}
         </button>
       ) : plan.customPrice ? (
         <a
           href="mailto:support@gentek.ai"
-          className="block w-full py-2 rounded-xl text-sm font-semibold text-center transition-colors mb-4 border border-gray-600 text-gray-300 hover:bg-gray-700"
+          className="block w-full py-2 rounded-xl text-sm font-semibold text-center transition-colors mb-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
         >
           {plan.cta}
         </a>
       ) : (
         <button
           onClick={() => onUpgrade(plan)}
-          className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-600 text-gray-300 hover:bg-gray-700"
+          className="w-full py-2 rounded-xl text-sm font-semibold transition-colors mb-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
         >
           {plan.cta}
         </button>
@@ -217,8 +217,8 @@ function PlanCard({ plan, annual, onUpgrade }) {
 
       <ul className="space-y-2 mt-auto">
         {plan.features.map(f => (
-          <li key={f} className="flex items-start gap-2 text-xs text-gray-300">
-            <Check size={12} weight="bold" className={`flex-shrink-0 mt-0.5 ${plan.featured ? 'text-blue-400' : 'text-gray-500'}`} />
+          <li key={f} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
+            <Check size={12} weight="bold" className={`flex-shrink-0 mt-0.5 ${plan.featured ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'}`} />
             {f}
           </li>
         ))}
@@ -247,8 +247,8 @@ export default function PricingModal() {
 
       {/* Modal panel */}
       <div
-        className="relative w-full max-w-5xl rounded-2xl overflow-hidden shadow-2xl"
-        style={{ background: '#0d1117', animation: 'slideUp 0.3s cubic-bezier(0.16,1,0.3,1)' }}
+        className="relative w-full max-w-5xl rounded-2xl overflow-hidden shadow-2xl bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800"
+        style={{ animation: 'slideUp 0.3s cubic-bezier(0.16,1,0.3,1)' }}
       >
         <style>{`
           @keyframes slideUp {
@@ -260,26 +260,28 @@ export default function PricingModal() {
         {/* Close button */}
         <button
           onClick={closePricing}
-          className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+          className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
         >
           <X size={15} weight="bold" />
         </button>
 
         {/* Header */}
         <div className="pt-10 pb-8 text-center px-6">
-          <h2 className="text-3xl font-bold text-white mb-1">
+          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
             {tab === 'personal' ? 'Upgrade your plan' : 'Plans for your team'}
           </h2>
-          <p className="text-gray-400 text-sm mb-7">Start free. Upgrade when you need more.</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm mb-7">Start free. Upgrade when you need more.</p>
 
           {/* Tabs */}
-          <div className="inline-flex items-center bg-gray-800 border border-gray-700 rounded-full p-1 mb-5">
+          <div className="inline-flex items-center bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full p-1 mb-5">
             {['personal', 'business'].map(t => (
               <button
                 key={t}
                 onClick={() => { setTab(t); if (t === 'business') setAnnual(false) }}
                 className={`px-5 py-1.5 rounded-full text-sm font-semibold capitalize transition-all ${
-                  tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-200'
+                  tab === t
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }`}
               >
                 {t.charAt(0).toUpperCase() + t.slice(1)}
@@ -290,16 +292,16 @@ export default function PricingModal() {
           {/* Annual toggle */}
           {tab === 'personal' && (
             <div className="flex items-center justify-center gap-3">
-              <span className={`text-sm font-medium ${!annual ? 'text-white' : 'text-gray-500'}`}>Monthly</span>
+              <span className={`text-sm font-medium ${!annual ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>Monthly</span>
               <button
                 onClick={() => setAnnual(o => !o)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${annual ? 'bg-blue-600' : 'bg-gray-700'}`}
+                className={`relative w-10 h-5 rounded-full transition-colors ${annual ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-700'}`}
               >
                 <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${annual ? 'translate-x-5' : ''}`} />
               </button>
-              <span className={`text-sm font-medium flex items-center gap-1.5 ${annual ? 'text-white' : 'text-gray-500'}`}>
+              <span className={`text-sm font-medium flex items-center gap-1.5 ${annual ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>
                 Annual
-                <span className="bg-green-900/60 text-green-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">Save 25%</span>
+                <span className="bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">Save 25%</span>
               </span>
             </div>
           )}
@@ -315,10 +317,10 @@ export default function PricingModal() {
         </div>
 
         {/* Footer note */}
-        <div className="border-t border-gray-800 px-6 py-4 text-center">
-          <p className="text-xs text-gray-500">
+        <div className="border-t border-gray-100 dark:border-gray-800 px-6 py-4 text-center">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
             No credit card required for the free plan. Cancel anytime.
-            <button onClick={closePricing} className="ml-2 text-gray-400 hover:text-white underline transition-colors">
+            <button onClick={closePricing} className="ml-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline transition-colors">
               Continue with Free
             </button>
           </p>
