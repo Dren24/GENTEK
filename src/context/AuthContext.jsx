@@ -1,11 +1,11 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useState, useEffect } from 'react'
 
 const AuthContext = createContext(null)
 
 function getGroup(ts) {
-  const now   = Date.now()
-  const diff  = now - ts
-  const day   = 86400000
+  const now  = Date.now()
+  const diff = now - ts
+  const day  = 86400000
   if (diff < day)     return 'Today'
   if (diff < day * 2) return 'Yesterday'
   return 'Previous 7 Days'
@@ -26,33 +26,79 @@ export function AuthProvider({ children }) {
     } catch { return null }
   })
 
-  const [history, setHistory] = useState(() => {
-    try {
-      const s = localStorage.getItem('gentek-history')
-      return s ? JSON.parse(s) : []
-    } catch { return [] }
-  })
-
+  const [history, setHistory] = useState([])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [pricingOpen, setPricingOpen] = useState(false)
 
-  const login = (u) => {
+  // Load history from DB when user logs in
+  useEffect(() => {
+    if (!user?.id) { setHistory([]); return }
+    fetch(`/auth/history/${user.id}`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setHistory(data.map(h => ({
+            ...h,
+            dot: DOT[h.classification] || 'bg-gray-400',
+          })))
+        }
+      })
+      .catch(() => {})
+  }, [user?.id])
+
+  const login = async (email, password) => {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.detail || 'Login failed')
+    }
+    const u = await res.json()
     setUser(u)
     localStorage.setItem('gentek-user', JSON.stringify(u))
+    return u
+  }
+
+  const register = async (name, email, password) => {
+    const res = await fetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.detail || 'Registration failed')
+    }
+    const u = await res.json()
+    setUser(u)
+    localStorage.setItem('gentek-user', JSON.stringify(u))
+    return u
   }
 
   const logout = () => {
     setUser(null)
+    setHistory([])
     localStorage.removeItem('gentek-user')
   }
 
-  const updateUser = (updates) => {
-    const updated = { ...user, ...updates }
-    setUser(updated)
-    localStorage.setItem('gentek-user', JSON.stringify(updated))
+  const updateUser = async (updates) => {
+    if (!user?.id) return
+    const res = await fetch(`/auth/update/${user.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: updates.name ?? user.name, email: user.email, password: '' }),
+    })
+    if (res.ok) {
+      const updated = { ...user, ...updates }
+      setUser(updated)
+      localStorage.setItem('gentek-user', JSON.stringify(updated))
+    }
   }
 
-  const addToHistory = (text, results) => {
+  const addToHistory = async (text, results) => {
     const item = {
       id:             Date.now(),
       label:          text.slice(0, 48).trim() + (text.length > 48 ? '…' : ''),
@@ -62,11 +108,23 @@ export function AuthProvider({ children }) {
       dot:            DOT[results.label] || 'bg-gray-400',
       timestamp:      Date.now(),
     }
-    setHistory(prev => {
-      const next = [item, ...prev.filter(h => h.text !== text)].slice(0, 20)
-      localStorage.setItem('gentek-history', JSON.stringify(next))
-      return next
-    })
+
+    // Optimistic update in UI
+    setHistory(prev => [item, ...prev.filter(h => h.text !== text)].slice(0, 20))
+
+    // Save to database if user is logged in
+    if (user?.id) {
+      fetch(`/auth/history/${user.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label:          item.label,
+          text:           item.text,
+          score:          item.score,
+          classification: item.classification,
+        }),
+      }).catch(() => {})
+    }
   }
 
   const toggleSidebar = () => setSidebarOpen(o => !o)
@@ -76,7 +134,12 @@ export function AuthProvider({ children }) {
   const historyWithGroups = history.map(h => ({ ...h, group: getGroup(h.timestamp) }))
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser, history: historyWithGroups, addToHistory, sidebarOpen, toggleSidebar, pricingOpen, openPricing, closePricing }}>
+    <AuthContext.Provider value={{
+      user, login, register, logout, updateUser,
+      history: historyWithGroups, addToHistory,
+      sidebarOpen, toggleSidebar,
+      pricingOpen, openPricing, closePricing,
+    }}>
       {children}
     </AuthContext.Provider>
   )

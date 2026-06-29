@@ -4,16 +4,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+from database import engine, Base
 from analyzer import analyze
+import auth
+
+# Create all tables on startup
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="GENTEK Bias Analyzer API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+# Auth routes
+app.include_router(auth.router)
 
 
 class AnalyzeRequest(BaseModel):
@@ -39,5 +48,4 @@ if os.path.isdir(DIST):
 
     @app.get("/{full_path:path}")
     def serve_react(full_path: str):
-        index = os.path.join(DIST, "index.html")
-        return FileResponse(index)
+        return FileResponse(os.path.join(DIST, "index.html"))

@@ -16,10 +16,11 @@ function GoogleIcon() {
 
 // view: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
 export default function AuthModal({ mode = 'signup', onClose }) {
-  const { login }               = useAuth()
+  const { login, register }     = useAuth()
   const [view, setView]         = useState(mode)
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
   const [form, setForm]         = useState({ name: '', email: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
 
@@ -34,17 +35,24 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+  const set = (field) => (e) => { setForm({ ...form, [field]: e.target.value }); setError('') }
 
-  const handleAuth = (e) => {
+  const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
-    setTimeout(() => {
-      const name = view === 'signup' ? form.name : (form.email.split('@')[0])
-      login({ name: name || 'User', email: form.email })
-      setLoading(false)
+    setError('')
+    try {
+      if (view === 'signup') {
+        await register(form.name, form.email, form.password)
+      } else {
+        await login(form.email, form.password)
+      }
       setView('done')
-    }, 1400)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleForgot = (e) => {
@@ -285,6 +293,12 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                       Forgot password?
                     </button>
                   </div>
+                )}
+
+                {error && (
+                  <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">
+                    {error}
+                  </p>
                 )}
 
                 <button
