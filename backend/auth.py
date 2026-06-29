@@ -94,6 +94,16 @@ def save_analysis(user_id: int, req: AnalysisIn, db: Session = Depends(get_db)):
     return {"id": analysis.id}
 
 
+@router.delete("/history/{user_id}/{analysis_id}")
+def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db)):
+    item = db.query(Analysis).filter(Analysis.id == analysis_id, Analysis.user_id == user_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    db.delete(item)
+    db.commit()
+    return {"message": "Deleted"}
+
+
 @router.get("/history/{user_id}")
 def get_history(user_id: int, db: Session = Depends(get_db)):
     items = (

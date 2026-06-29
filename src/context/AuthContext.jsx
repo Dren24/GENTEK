@@ -127,6 +127,13 @@ export function AuthProvider({ children }) {
     }
   }
 
+  const deleteHistory = (id) => {
+    setHistory(prev => prev.filter(h => h.id !== id))
+    if (user?.id) {
+      fetch(`/auth/history/${user.id}/${id}`, { method: 'DELETE' }).catch(() => {})
+    }
+  }
+
   const toggleSidebar = () => setSidebarOpen(o => !o)
   const openPricing   = () => setPricingOpen(true)
   const closePricing  = () => setPricingOpen(false)
@@ -136,7 +143,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       user, login, register, logout, updateUser,
-      history: historyWithGroups, addToHistory,
+      history: historyWithGroups, addToHistory, deleteHistory,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,
     }}>

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Plus, ClockCounterClockwise, Lightning, FileText,
   Gear, Question, SignOut, SidebarSimple, Sun, Moon,
-  PushPin, MagnifyingGlass, Circle, X, PencilSimple,
+  PushPin, MagnifyingGlass, X, PencilSimple, Trash,
 } from '@phosphor-icons/react'
 import GentekMark, { GentekWordmark } from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
@@ -187,7 +187,7 @@ function UserPopup({ user, logout, onClose, onNavigate }) {
 
 /* ════════════════════ SIDEBAR ════════════════════ */
 export default function AppSidebar() {
-  const { user, logout, history, sidebarOpen, toggleSidebar, openPricing } = useAuth()
+  const { user, logout, history, sidebarOpen, toggleSidebar, openPricing, deleteHistory } = useAuth()
   const [dark, setDark] = useDarkMode()
   const navigate = useNavigate()
 
@@ -296,7 +296,7 @@ export default function AppSidebar() {
               )}
               {recentItems.map(r => (
                 <div key={r.id} className="group relative">
-                  <button onClick={() => loadText(r)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white dark:hover:bg-gray-800 transition-colors text-left pr-8">
+                  <button onClick={() => loadText(r)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white dark:hover:bg-gray-800 transition-colors text-left pr-14">
                     <FileText size={14} className="text-gray-400 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{r.label}</p>
@@ -304,20 +304,25 @@ export default function AppSidebar() {
                     </div>
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.dot}`} />
                   </button>
-                  <button onClick={() => togglePin(r.id)} title="Pin" className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-brand-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all">
-                    <PushPin size={12} weight="regular" />
-                  </button>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-all">
+                    <button onClick={() => togglePin(r.id)} title="Pin" className="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-brand-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                      <PushPin size={11} weight="regular" />
+                    </button>
+                    <button onClick={() => deleteHistory(r.id)} title="Delete" className="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors">
+                      <Trash size={11} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
 
             {/* Upgrade */}
-            <div className="mx-3 p-3 rounded-xl bg-brand-50 dark:bg-brand-900/20 border border-brand-100 dark:border-brand-800 mb-3">
+            <div className="mx-3 p-3 rounded-xl bg-white dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 shadow-sm dark:shadow-none mb-3">
               <div className="flex items-center gap-1.5 mb-1">
-                <Lightning size={12} weight="fill" className="text-brand-600" />
+                <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
                 <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Pro</span>
               </div>
-              <p className="text-[11px] text-brand-600 dark:text-brand-400 leading-relaxed mb-2">Unlimited analyses, exports, API access and history.</p>
+              <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mb-2">Unlimited analyses, exports, API access and history.</p>
               <button onClick={openPricing} className="block w-full text-center text-[11px] font-bold bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-1.5 transition-colors">
                 Upgrade →
               </button>
