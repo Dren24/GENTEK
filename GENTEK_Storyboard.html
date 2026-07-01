@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GENTEK – UI/UX Storyboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #1a1a1a; background: #fff; padding: 32px 40px; max-width: 960px; margin: 0 auto; }
+    .cover { text-align: center; padding: 60px 0 40px; border-bottom: 3px solid #0d9488; margin-bottom: 48px; }
+    .cover .system-name { font-size: 36px; font-weight: 800; color: #0d9488; letter-spacing: 4px; margin-bottom: 6px; }
+    .cover .subtitle { font-size: 15px; color: #555; margin-bottom: 24px; }
+    .cover .meta-table { display: inline-block; text-align: left; }
+    .cover .meta-table td { padding: 4px 12px 4px 0; font-size: 13px; color: #333; }
+    .cover .meta-table td:first-child { font-weight: 700; color: #0d9488; min-width: 130px; }
+    .toc { margin-bottom: 48px; padding: 20px 24px; background: #f0fdfa; border-left: 4px solid #0d9488; border-radius: 0 8px 8px 0; }
+    .toc h2 { font-size: 14px; font-weight: 700; color: #0d9488; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .toc ol { padding-left: 20px; }
+    .toc li { margin-bottom: 4px; font-size: 12.5px; color: #333; }
+    .module-header { background: #0d9488; color: white; padding: 10px 18px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; border-radius: 6px; margin: 48px 0 24px; }
+    .screen { border: 1.5px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 36px; page-break-inside: avoid; }
+    .screen-header { background: #f8fafc; border-bottom: 1.5px solid #e2e8f0; padding: 12px 18px; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+    .screen-no { font-size: 11px; font-weight: 700; color: #0d9488; text-transform: uppercase; letter-spacing: 1px; min-width: 80px; }
+    .screen-name { font-size: 15px; font-weight: 700; color: #1a1a1a; flex: 1; }
+    .screen-module-badge { font-size: 10.5px; background: #e6f7f5; color: #0d9488; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+    .screen-body { padding: 18px; }
+    .label { font-size: 10px; font-weight: 700; color: #0d9488; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+    .description { font-size: 12.5px; color: #444; line-height: 1.6; margin-bottom: 16px; }
+    .screenshot-box { border: 2px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 16px; color: #94a3b8; font-size: 12px; gap: 8px; }
+    .screenshot-box .placeholder-icon { font-size: 32px; opacity: 0.5; }
+    .screenshot-box .placeholder-text { font-weight: 600; font-size: 12.5px; }
+    .screenshot-box .placeholder-sub { font-size: 11px; color: #b0bec5; }
+    .screenshot-box img { max-width: 100%; max-height: 420px; border-radius: 4px; display: block; }
+    .items-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px; }
+    .items-table th { background: #0d9488; color: white; padding: 7px 10px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .items-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #374151; }
+    .items-table tr:last-child td { border-bottom: none; }
+    .items-table tr:nth-child(even) td { background: #f8fafc; }
+    .required-yes { color: #16a34a; font-weight: 600; }
+    .required-no  { color: #94a3b8; }
+    .logic-list { padding-left: 18px; font-size: 12.5px; color: #374151; line-height: 1.7; }
+    .logic-list li { margin-bottom: 3px; }
+    .section-gap { margin-bottom: 14px; }
+    @media print { body { padding: 16px 20px; } .module-header { break-before: page; } .screen { page-break-inside: avoid; } }
+  </style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="system-name">GENTEK</div>
+  <div class="subtitle">AI-Powered Gender Bias Detector &mdash; UI/UX Storyboard</div>
+  <table class="meta-table">
+    <tr><td>System Name</td><td>GENTEK &ndash; Gender Bias Detection System</td></tr>
+    <tr><td>Document Type</td><td>UI/UX Storyboard</td></tr>
+    <tr><td>Technology Stack</td><td>React 18 &middot; Vite &middot; Tailwind CSS &middot; Python FastAPI &middot; SQLite</td></tr>
+    <tr><td>Version</td><td>1.0.0</td></tr>
+    <tr><td>Date</td><td>June 2026</td></tr>
+  </table>
+</div>
+
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <ol>
+    <li><strong>Module 1 – Public Landing &amp; Navigation</strong>
+      <ul style="list-style:none;padding-left:14px;margin-top:4px;">
+        <li>Screen 1.1 – Homepage (Guest View)</li>
+        <li>Screen 1.2 – About Page</li>
+        <li>Screen 1.3 – Contact Page</li>
+        <li>Screen 1.4 – Pricing Section</li>
+      </ul>
+    </li>
+    <li style="margin-top:8px;"><strong>Module 2 – User Authentication</strong>
+      <ul style="list-style:none;padding-left:14px;margin-top:4px;">
+        <li>Screen 2.1 – Login Modal</li>
+        <li>Screen 2.2 – Sign Up Modal</li>
+      </ul>
+    </li>
+    <li style="margin-top:8px;"><strong>Module 3 – Gender Bias Analysis</strong>
+      <ul style="list-style:none;padding-left:14px;margin-top:4px;">
+        <li>Screen 3.1 – Text Analyzer Input</li>
+        <li>Screen 3.2 – Analysis Results Display</li>
+      </ul>
+    </li>
+    <li style="margin-top:8px;"><strong>Module 4 – Analysis History</strong>
+      <ul style="list-style:none;padding-left:14px;margin-top:4px;">
+        <li>Screen 4.1 – Sidebar (Expanded)</li>
+        <li>Screen 4.2 – Sidebar (Collapsed)</li>
+      </ul>
+    </li>
+    <li style="margin-top:8px;"><strong>Module 5 – Account Management</strong>
+      <ul style="list-style:none;padding-left:14px;margin-top:4px;">
+        <li>Screen 5.1 – Settings Page</li>
+        <li>Screen 5.2 – Delete Account Modal</li>
+      </ul>
+    </li>
+  </ol>
+</div>
+
+<div class="module-header">Module 1 &mdash; Public Landing &amp; Navigation</div>
+
+<!-- Screen 1.1 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 1.1</span>
+    <span class="screen-name">Homepage &ndash; Guest View</span>
+    <span class="screen-module-badge">Module 1 &middot; Public Landing</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Main landing page for unauthenticated visitors. Sticky Navbar with logo, navigation links (Features, Pricing, About, Contact), Sign In and Get Started buttons. Sections below: Hero (headline + CTA), Features, How It Works, Pricing, FAQ, and Footer CTA strip. All sections are scroll-animated via Intersection Observer.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Homepage Screenshot (Guest View)</div>
+      <div class="placeholder-sub">Replace with actual screenshot of the homepage hero &amp; navbar</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>GENTEK Logo / Wordmark</td><td>Image / Link</td><td class="required-yes">Yes</td><td>SVG</td><td>Navigates to /</td></tr>
+        <tr><td>Navbar Links (Features, Pricing, About, Contact)</td><td>Anchor Links</td><td class="required-yes">Yes</td><td>String</td><td>Hash-scroll or route navigation</td></tr>
+        <tr><td>Sign In Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Opens Login Modal</td></tr>
+        <tr><td>Get Started Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Opens Sign Up Modal</td></tr>
+        <tr><td>Dark / Light Mode Toggle</td><td>Toggle Icon Button</td><td class="required-yes">Yes</td><td>Boolean</td><td>Persisted to localStorage</td></tr>
+        <tr><td>Hero Headline</td><td>Text</td><td class="required-yes">Yes</td><td>String</td><td>Static marketing copy</td></tr>
+        <tr><td>Hero Sub-headline</td><td>Text</td><td class="required-yes">Yes</td><td>String</td><td>Static marketing copy</td></tr>
+        <tr><td>Hero CTA — "Try Free Now"</td><td>Button / Link</td><td class="required-yes">Yes</td><td>—</td><td>Scrolls to analyzer section</td></tr>
+        <tr><td>Section Reveal Animations</td><td>CSS Class Trigger</td><td class="required-no">No</td><td>—</td><td>Intersection Observer adds .visible</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>User opens the app URL — system checks localStorage for a saved session.</li>
+      <li>If no session found, render guest view: Navbar with Sign In / Get Started, hero section visible.</li>
+      <li>Clicking a Navbar hash link triggers ScrollToTop which uses getElementById and scrollIntoView.</li>
+      <li>Intersection Observer watches .reveal elements; adds class="visible" when element enters viewport.</li>
+      <li>Dark/Light toggle reads/writes localStorage key gentek-dark; toggles &lt;html&gt; class for Tailwind dark: variants.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 1.2 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 1.2</span>
+    <span class="screen-name">About Page</span>
+    <span class="screen-module-badge">Module 1 &middot; Public Landing</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Full-page informational screen at /about describing the GENTEK project — its mission, how it uses NLP and machine learning to detect gender bias in text, and the team behind it. Accessible to both guests and authenticated users.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">About Page Screenshot</div>
+      <div class="placeholder-sub">Replace with actual screenshot of the About page</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Page Hero — Title &amp; Subtitle</td><td>Text Block</td><td class="required-yes">Yes</td><td>String</td><td>Static content</td></tr>
+        <tr><td>Mission Statement Section</td><td>Text Block</td><td class="required-yes">Yes</td><td>String</td><td>Paragraph copy</td></tr>
+        <tr><td>Feature Highlight Cards</td><td>Card Grid</td><td class="required-yes">Yes</td><td>Array</td><td>Icon + title + description</td></tr>
+        <tr><td>Team / Creator Info</td><td>Text / Image</td><td class="required-no">No</td><td>String</td><td>Optional team section</td></tr>
+        <tr><td>Shared Navbar &amp; Footer</td><td>Layout Component</td><td class="required-yes">Yes</td><td>—</td><td>Rendered by App.jsx shell</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>User clicks "About" in Navbar or Footer — React Router navigates to /about.</li>
+      <li>ScrollToTop fires and calls window.scrollTo(0, 0).</li>
+      <li>Page renders static content; no API calls required.</li>
+      <li>Intersection Observer re-attaches to .reveal elements after 100 ms delay.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 1.3 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 1.3</span>
+    <span class="screen-name">Contact Page</span>
+    <span class="screen-module-badge">Module 1 &middot; Public Landing</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Two-column contact page at /contact. Left column (2/5 width): contact info card, social links (GitHub, Twitter, LinkedIn), and quick navigation links. Right column (3/5 width): contact form with Name, Email, Subject dropdown, and Message fields. After submission, a success screen with a checkmark replaces the form.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Contact Page Screenshot</div>
+      <div class="placeholder-sub">Replace with actual screenshot — show both the info sidebar and the contact form</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Your Name</td><td>Text Input</td><td class="required-yes">Yes</td><td>String</td><td>Placeholder: "Juan dela Cruz"</td></tr>
+        <tr><td>Email Address</td><td>Email Input</td><td class="required-yes">Yes</td><td>String (email)</td><td>Browser validates email format</td></tr>
+        <tr><td>Subject</td><td>Select Dropdown</td><td class="required-yes">Yes</td><td>Enum</td><td>General / Partnership / Feedback / Bug / Enterprise / Other</td></tr>
+        <tr><td>Message</td><td>Textarea</td><td class="required-yes">Yes</td><td>String</td><td>6 rows; free-text body</td></tr>
+        <tr><td>Send Message Button</td><td>Submit Button</td><td class="required-yes">Yes</td><td>—</td><td>Spinner shown during 1.4 s simulated send</td></tr>
+        <tr><td>Contact Info Card</td><td>Static Card</td><td class="required-yes">Yes</td><td>—</td><td>Email + Location rows</td></tr>
+        <tr><td>Social Links</td><td>Link List</td><td class="required-no">No</td><td>URL</td><td>GitHub, Twitter, LinkedIn</td></tr>
+        <tr><td>Quick Links</td><td>Link List</td><td class="required-no">No</td><td>Route / Hash</td><td>"View Pricing" routes to /#pricing</td></tr>
+        <tr><td>Success Screen</td><td>Conditional View</td><td class="required-yes">Yes</td><td>Boolean</td><td>Replaces form after submission</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>User navigates to /contact; form state initialised with empty strings.</li>
+      <li>User fills out all required fields; browser validates email format on submit.</li>
+      <li>On submit: loading = true, spinner shown on button.</li>
+      <li>After 1 400 ms simulated delay, loading = false, sent = true.</li>
+      <li>Success screen rendered with green checkmark and "Message Sent!" heading.</li>
+      <li>"Send another message" resets sent and form fields back to empty.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 1.4 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 1.4</span>
+    <span class="screen-name">Pricing Section (Homepage)</span>
+    <span class="screen-module-badge">Module 1 &middot; Public Landing</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Pricing section embedded in the Homepage at anchor #pricing. Contains a Personal / Business tab switcher and three plan cards (Free, Pro, Enterprise) that adapt to the active dark/light theme. Clicking "Get Started" on a paid plan opens the Pricing Modal overlay. The Pro card is visually highlighted as the recommended plan.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Pricing Section Screenshot</div>
+      <div class="placeholder-sub">Replace with screenshot — show all three plan cards (Free, Pro, Enterprise)</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Tab Switcher (Personal / Business)</td><td>Segmented Control</td><td class="required-yes">Yes</td><td>Enum</td><td>Switches plan set displayed</td></tr>
+        <tr><td>Plan Cards (Free, Pro, Enterprise)</td><td>Card Grid</td><td class="required-yes">Yes</td><td>Array</td><td>Price, features list, CTA button per card</td></tr>
+        <tr><td>Pro Plan — "Popular" Badge</td><td>Badge</td><td class="required-no">No</td><td>—</td><td>Decorative highlight</td></tr>
+        <tr><td>Get Started / Contact Sales Buttons</td><td>Button / Link</td><td class="required-yes">Yes</td><td>—</td><td>Opens PricingModal or routes to /contact</td></tr>
+        <tr><td>Pricing Modal Overlay</td><td>Modal (z-60)</td><td class="required-no">No</td><td>—</td><td>Triggered from AuthContext openPricing()</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>User scrolls to or navigates to /#pricing; pricing section becomes visible.</li>
+      <li>Default tab is "Personal"; user may click "Business" to swap plan set.</li>
+      <li>Clicking "Get Started" on Free plan scrolls up to the analyzer.</li>
+      <li>Clicking "Get Started" on Pro or Enterprise calls openPricing() from AuthContext.</li>
+      <li>Global &lt;PricingModal /&gt; in App.jsx detects pricingOpen and displays the checkout overlay.</li>
+      <li>Closing the modal calls closePricing(), returning pricingOpen to false.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="module-header">Module 2 &mdash; User Authentication</div>
+
+<!-- Screen 2.1 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 2.1</span>
+    <span class="screen-name">Login Modal</span>
+    <span class="screen-module-badge">Module 2 &middot; Authentication</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Centered modal overlay that appears when the user clicks "Sign In" from the Navbar or any CTA requiring authentication. Contains Email and Password fields, a show/hide password toggle, and a "Sign In" submit button. Inline error messages are shown on API failure. A footer link switches to the Sign Up Modal.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Login Modal Screenshot</div>
+      <div class="placeholder-sub">Replace with actual screenshot of the login modal (open/visible state)</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Email Address</td><td>Email Input</td><td class="required-yes">Yes</td><td>String (email)</td><td>Validated on submit</td></tr>
+        <tr><td>Password</td><td>Password Input</td><td class="required-yes">Yes</td><td>String</td><td>Min 6 characters</td></tr>
+        <tr><td>Show/Hide Password Toggle</td><td>Icon Button</td><td class="required-no">No</td><td>Boolean</td><td>Toggles input type password / text</td></tr>
+        <tr><td>Sign In Button</td><td>Submit Button</td><td class="required-yes">Yes</td><td>—</td><td>Shows loading spinner while POSTing</td></tr>
+        <tr><td>Error Message</td><td>Alert Text</td><td class="required-no">No</td><td>String</td><td>Shown only when API returns an error</td></tr>
+        <tr><td>Switch to Sign Up Link</td><td>Text Button</td><td class="required-yes">Yes</td><td>—</td><td>Switches modal view to Sign Up</td></tr>
+        <tr><td>Close / Backdrop Click</td><td>Dismiss Trigger</td><td class="required-yes">Yes</td><td>—</td><td>Closes modal, returns to previous screen</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>Modal opens on top of current page with a semi-transparent backdrop.</li>
+      <li>User enters email and password; form validates both fields are non-empty.</li>
+      <li>On submit, login(email, password) from AuthContext fires a POST /auth/login request.</li>
+      <li>On success: user object saved to state and localStorage; modal closes; sidebar appears.</li>
+      <li>On failure: API error message shown inline; form remains open.</li>
+      <li>Clicking backdrop or close button dismisses the modal with no state changes.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 2.2 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 2.2</span>
+    <span class="screen-name">Sign Up Modal</span>
+    <span class="screen-module-badge">Module 2 &middot; Authentication</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Account registration modal with four fields: Display Name, Email Address, Password, and Confirm Password. Submission calls the registration API; on success the user is automatically logged in and the modal closes. A footer link switches back to the Login Modal.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Sign Up Modal Screenshot</div>
+      <div class="placeholder-sub">Replace with actual screenshot of the Sign Up / Register modal</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Display Name</td><td>Text Input</td><td class="required-yes">Yes</td><td>String</td><td>Shown in sidebar avatar initial</td></tr>
+        <tr><td>Email Address</td><td>Email Input</td><td class="required-yes">Yes</td><td>String (email)</td><td>Must be unique in the database</td></tr>
+        <tr><td>Password</td><td>Password Input</td><td class="required-yes">Yes</td><td>String</td><td>Min 6 characters; hashed with bcrypt on backend</td></tr>
+        <tr><td>Confirm Password</td><td>Password Input</td><td class="required-yes">Yes</td><td>String</td><td>Client-side match validation</td></tr>
+        <tr><td>Create Account Button</td><td>Submit Button</td><td class="required-yes">Yes</td><td>—</td><td>Disabled until all fields valid</td></tr>
+        <tr><td>Error Message</td><td>Alert Text</td><td class="required-no">No</td><td>String</td><td>e.g., "Email already registered"</td></tr>
+        <tr><td>Switch to Login Link</td><td>Text Button</td><td class="required-yes">Yes</td><td>—</td><td>Switches modal view to Login</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>User fills in all four fields; client-side checks that Confirm Password matches Password.</li>
+      <li>On submit, register(name, email, password) fires POST /auth/register.</li>
+      <li>Backend hashes password with bcrypt and stores user in SQLite; returns user object.</li>
+      <li>On success: user auto-logged in; modal closes.</li>
+      <li>On failure (e.g., duplicate email): error displayed inline, form stays open.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="module-header">Module 3 &mdash; Gender Bias Analysis</div>
+
+<!-- Screen 3.1 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 3.1</span>
+    <span class="screen-name">Text Analyzer &mdash; Input State</span>
+    <span class="screen-module-badge">Module 3 &middot; Analysis</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">The core analysis tool embedded in the Homepage. A large textarea where the user pastes or types text. Below: a word/character counter, a Clear icon button, and the "Analyze Text" primary button. While the backend processes the request, the button shows a spinner and is disabled.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Analyzer Input Screenshot</div>
+      <div class="placeholder-sub">Replace with screenshot showing the textarea with sample text entered, before analysis</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Text Input Textarea</td><td>Textarea</td><td class="required-yes">Yes</td><td>String</td><td>Auto-grows; max 5 000 chars</td></tr>
+        <tr><td>Word Count Display</td><td>Label / Counter</td><td class="required-no">No</td><td>Integer</td><td>Live count, updates on each keystroke</td></tr>
+        <tr><td>Character Count Display</td><td>Label / Counter</td><td class="required-no">No</td><td>Integer</td><td>Live count, updates on each keystroke</td></tr>
+        <tr><td>Clear Button</td><td>Icon Button</td><td class="required-no">No</td><td>—</td><td>Resets textarea and results</td></tr>
+        <tr><td>Analyze Text Button</td><td>Submit Button</td><td class="required-yes">Yes</td><td>—</td><td>Disabled when text is empty or loading</td></tr>
+        <tr><td>Loading Spinner</td><td>Loading State</td><td class="required-no">No</td><td>Boolean</td><td>Shown only while awaiting API response</td></tr>
+        <tr><td>Sample Text Insert Link</td><td>Text Button</td><td class="required-no">No</td><td>—</td><td>Inserts a demo sentence for first-time users</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>User types or pastes text into the textarea; word/char counters update reactively.</li>
+      <li>"Analyze Text" button becomes active when text.trim().length &gt; 0.</li>
+      <li>On click, loading = true; button disabled; spinner displayed.</li>
+      <li>POST /analyze request sent with { text } payload to the FastAPI backend.</li>
+      <li>NLP model classifies the text and returns { label, score, tokens[] }.</li>
+      <li>On success: results saved to state; UI transitions to Screen 3.2.</li>
+      <li>If user is authenticated: addToHistory(text, results) persists to DB and updates sidebar.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 3.2 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 3.2</span>
+    <span class="screen-name">Analysis Results Display</span>
+    <span class="screen-module-badge">Module 3 &middot; Analysis</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Results panel rendered after a successful analysis. Shows the classification label (Male-Biased, Female-Biased, Gender-Neutral, or Mixed-Bias), a confidence score percentage, a color-coded badge, and a token-level breakdown of flagged words. A "Clear" action resets the analyzer.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Analysis Results Screenshot</div>
+      <div class="placeholder-sub">Replace with screenshot showing a result — e.g., "Male-Biased" classification with score and highlighted tokens</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Classification Label Badge</td><td>Badge</td><td class="required-yes">Yes</td><td>Enum</td><td>MALE-BIASED / FEMALE-BIASED / GENDER-NEUTRAL / MIXED-BIAS</td></tr>
+        <tr><td>Confidence Score</td><td>Percentage Display</td><td class="required-yes">Yes</td><td>Float (0–1)</td><td>Displayed as e.g., "87.4% confidence"</td></tr>
+        <tr><td>Score Gauge / Progress Bar</td><td>Visual Indicator</td><td class="required-no">No</td><td>Float</td><td>Color-coded by classification</td></tr>
+        <tr><td>Token Highlight List</td><td>Inline Text Chips</td><td class="required-no">No</td><td>String[]</td><td>Words flagged by the model</td></tr>
+        <tr><td>Explanation / Description Text</td><td>Text Block</td><td class="required-no">No</td><td>String</td><td>Short human-readable explanation of result</td></tr>
+        <tr><td>Clear / Analyze Another Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Resets textarea and results pane</td></tr>
+        <tr><td>Save to History Indicator</td><td>Toast / Badge</td><td class="required-no">No</td><td>—</td><td>Shown briefly when result saved to DB (auth users only)</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>Backend returns { label, score, tokens }; HomePage stores this in results state.</li>
+      <li>Classification badge colored: Blue (Male), Rose (Female), Teal (Neutral), Yellow (Mixed).</li>
+      <li>Score converted to percentage: (score * 100).toFixed(1).</li>
+      <li>Token chips render each flagged word from the model's token list.</li>
+      <li>If user is authenticated and a history entry exists for this text, updateHistory(id, results) is called instead of addToHistory.</li>
+      <li>Clicking "Clear" sets results to null and clears the textarea.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="module-header">Module 4 &mdash; Analysis History</div>
+
+<!-- Screen 4.1 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 4.1</span>
+    <span class="screen-name">App Sidebar &mdash; Expanded View</span>
+    <span class="screen-module-badge">Module 4 &middot; History</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Collapsible left sidebar visible to authenticated users. 256 px wide when expanded. Shows the GENTEK logo, user avatar with initials, a "New Analysis" button, and a grouped list of past analyses labelled Today / Yesterday / Previous 7 Days. Each entry has a colored dot (classification indicator), a text label snippet, and a delete button on hover.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Sidebar Expanded Screenshot</div>
+      <div class="placeholder-sub">Replace with screenshot of the full sidebar showing history groups and entries</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>GENTEK Logo / Wordmark</td><td>Image</td><td class="required-yes">Yes</td><td>SVG</td><td>Shown when expanded; icon only when collapsed</td></tr>
+        <tr><td>Collapse Toggle Button</td><td>Icon Button</td><td class="required-yes">Yes</td><td>Boolean</td><td>Toggles sidebar width 256 px ↔ 48 px</td></tr>
+        <tr><td>New Analysis Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Clears editor and results</td></tr>
+        <tr><td>Date Group Headers</td><td>Section Label</td><td class="required-no">No</td><td>Enum</td><td>Today / Yesterday / Previous 7 Days</td></tr>
+        <tr><td>History Entry (label + dot)</td><td>List Item / Button</td><td class="required-yes">Yes</td><td>Object</td><td>Click loads text into analyzer</td></tr>
+        <tr><td>Classification Dot</td><td>Colored Dot</td><td class="required-yes">Yes</td><td>Enum (CSS class)</td><td>Blue / Rose / Teal / Yellow by bias type</td></tr>
+        <tr><td>Delete Entry Button</td><td>Icon Button (hover)</td><td class="required-yes">Yes</td><td>—</td><td>Calls DELETE /auth/history/{uid}/{id}</td></tr>
+        <tr><td>User Avatar + Name Footer</td><td>User Info Strip</td><td class="required-yes">Yes</td><td>String</td><td>First initial in brand-color circle</td></tr>
+        <tr><td>Settings Link</td><td>Nav Link</td><td class="required-yes">Yes</td><td>Route</td><td>Navigates to /settings</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>Sidebar rendered by App.jsx when user != null and route is not in HIDE_SHELL.</li>
+      <li>On login, AuthContext fetches GET /auth/history/{userId} and populates history state.</li>
+      <li>History items grouped by getGroup(timestamp) into Today / Yesterday / Previous 7 Days.</li>
+      <li>Clicking a history entry loads its stored text into the HomePage textarea.</li>
+      <li>Hovering an entry reveals the Trash icon; clicking calls deleteHistory(id).</li>
+      <li>deleteHistory optimistically removes item from state and fires DELETE to backend; sets lastDeletedId so HomePage clears editor if that entry is currently open.</li>
+      <li>Collapse button sets sidebarOpen in AuthContext; main content area margin-left transitions accordingly.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 4.2 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 4.2</span>
+    <span class="screen-name">App Sidebar &mdash; Collapsed (Icon Rail)</span>
+    <span class="screen-module-badge">Module 4 &middot; History</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Collapsed state of the sidebar: 48 px wide, showing only icon buttons with tooltips on hover. Visible icons: GENTEK brain icon (logo), Pen icon (New Analysis), Gear icon (Settings). User avatar collapses to first-initial icon. Clicking the expand chevron restores the full 256 px sidebar.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Sidebar Collapsed Screenshot</div>
+      <div class="placeholder-sub">Replace with screenshot of the narrow icon-only sidebar (48px wide)</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Brain Icon (Logo)</td><td>SVG Icon Button</td><td class="required-yes">Yes</td><td>—</td><td>Navigates to home</td></tr>
+        <tr><td>Expand Toggle Chevron</td><td>Icon Button</td><td class="required-yes">Yes</td><td>Boolean</td><td>Expands sidebar back to 256 px</td></tr>
+        <tr><td>New Analysis Icon</td><td>Icon Button</td><td class="required-yes">Yes</td><td>—</td><td>Pen icon; same action as expanded "New Analysis"</td></tr>
+        <tr><td>Settings Icon</td><td>Icon Button</td><td class="required-yes">Yes</td><td>Route</td><td>Gear icon; navigates to /settings</td></tr>
+        <tr><td>User Avatar (initial only)</td><td>Circle Avatar</td><td class="required-yes">Yes</td><td>String</td><td>Single uppercase initial</td></tr>
+        <tr><td>Hover Tooltips</td><td>Tooltip</td><td class="required-no">No</td><td>String</td><td>Labels appear on hover in collapsed state</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>When sidebarOpen = false, sidebar width is 48 px; icon buttons replace full-text labels.</li>
+      <li>Main content area margin-left transitions from 256 px to 48 px (CSS transition-all duration-300).</li>
+      <li>All sidebar actions remain available; labels are replaced with tooltips on hover.</li>
+      <li>Clicking the expand chevron calls toggleSidebar(), sets sidebarOpen = true.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="module-header">Module 5 &mdash; Account Management</div>
+
+<!-- Screen 5.1 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 5.1</span>
+    <span class="screen-name">Settings Page</span>
+    <span class="screen-module-badge">Module 5 &middot; Account</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Account settings page at /settings. Accessible only to authenticated users (guests are redirected to /). Five settings sections: Profile (editable display name + read-only email), Appearance (dark/light toggle), Notifications (email toggle), Security (Change Password + 2FA coming-soon badge), and Account (Sign Out + Delete Account).</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Settings Page Screenshot</div>
+      <div class="placeholder-sub">Replace with screenshot showing all five settings sections</div>
+    </div>
+    <div class="label section-gap">UI Elements</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>User Avatar Circle + Name / Email</td><td>Display</td><td class="required-yes">Yes</td><td>String</td><td>Read-only; shows current user data</td></tr>
+        <tr><td>Display Name Input</td><td>Text Input</td><td class="required-yes">Yes</td><td>String</td><td>Editable; saved via PUT /auth/update/{id}</td></tr>
+        <tr><td>Email Address Input</td><td>Text Input (read-only)</td><td class="required-yes">Yes</td><td>String</td><td>Greyed out; cannot be changed</td></tr>
+        <tr><td>Save Changes Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Shows "Saved!" for 2 s after click</td></tr>
+        <tr><td>Dark / Light Mode Toggle</td><td>Toggle Pill</td><td class="required-yes">Yes</td><td>Boolean</td><td>Teal when dark mode active</td></tr>
+        <tr><td>Email Notifications Toggle</td><td>Toggle Pill</td><td class="required-yes">Yes</td><td>Boolean</td><td>UI-only; no backend endpoint yet</td></tr>
+        <tr><td>Change Password Button</td><td>Text Button</td><td class="required-no">No</td><td>—</td><td>Not yet implemented</td></tr>
+        <tr><td>Two-Factor Auth "Coming Soon" Badge</td><td>Badge</td><td class="required-no">No</td><td>—</td><td>Decorative; no action</td></tr>
+        <tr><td>Sign Out Button</td><td>Button (danger)</td><td class="required-yes">Yes</td><td>—</td><td>Calls logout() + navigate to /</td></tr>
+        <tr><td>Delete Account Button</td><td>Button (danger)</td><td class="required-yes">Yes</td><td>—</td><td>Opens DeleteAccountModal (Screen 5.2)</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>If user == null, component returns Navigate to="/" replace immediately.</li>
+      <li>Display Name field pre-populated with user.name.</li>
+      <li>Clicking "Save Changes": calls updateUser({ name }), which PUTs to backend and updates localStorage.</li>
+      <li>Dark mode toggle calls setDark(prev =&gt; !prev) from useDarkMode hook; toggles dark class on &lt;html&gt;.</li>
+      <li>Sign Out calls logout() then navigate('/').</li>
+      <li>Delete Account button sets showDeleteModal = true, rendering Screen 5.2.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Screen 5.2 -->
+<div class="screen">
+  <div class="screen-header">
+    <span class="screen-no">Screen 5.2</span>
+    <span class="screen-name">Delete Account Modal</span>
+    <span class="screen-module-badge">Module 5 &middot; Account</span>
+  </div>
+  <div class="screen-body">
+    <div class="label">Description</div>
+    <p class="description">Two-step confirmation modal triggered from the Settings page. <strong>Step 1</strong>: Warning screen listing all consequences (analyses removed, profile erased, unrecoverable). <strong>Step 2</strong>: User must type their exact email address to unlock the "Permanently Delete" button — prevents accidental deletion.</p>
+    <div class="label">Figure &mdash; Screenshot</div>
+    <div class="screenshot-box">
+      <div class="placeholder-icon">🖼️</div>
+      <div class="placeholder-text">Delete Account Modal — Step 1 &amp; Step 2</div>
+      <div class="placeholder-sub">Replace with screenshots of both steps: warning screen and email confirm input</div>
+    </div>
+    <div class="label section-gap">UI Elements — Step 1 (Warning)</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Warning Icon (rose circle)</td><td>Icon</td><td class="required-yes">Yes</td><td>—</td><td>Phosphor Warning icon, rose color</td></tr>
+        <tr><td>Warning Headline</td><td>Text</td><td class="required-yes">Yes</td><td>String</td><td>"Delete your account?"</td></tr>
+        <tr><td>Consequence List</td><td>Unordered List</td><td class="required-yes">Yes</td><td>String[]</td><td>3 bullet points listing data lost</td></tr>
+        <tr><td>Cancel Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Closes modal; no action taken</td></tr>
+        <tr><td>"Yes, continue" Button</td><td>Button (rose)</td><td class="required-yes">Yes</td><td>—</td><td>Advances to Step 2</td></tr>
+      </tbody>
+    </table>
+    <div class="label section-gap">UI Elements — Step 2 (Email Confirm)</div>
+    <table class="items-table">
+      <thead><tr><th>Item</th><th>Type</th><th>Required?</th><th>Data Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Trash Icon (rose circle)</td><td>Icon</td><td class="required-yes">Yes</td><td>—</td><td>Phosphor Trash icon</td></tr>
+        <tr><td>Email Display (greyed box)</td><td>Read-Only Text</td><td class="required-yes">Yes</td><td>String</td><td>Shows user's current email for reference</td></tr>
+        <tr><td>Email Confirmation Input</td><td>Text Input</td><td class="required-yes">Yes</td><td>String</td><td>Auto-focused; must match user email exactly</td></tr>
+        <tr><td>Back Button</td><td>Button</td><td class="required-yes">Yes</td><td>—</td><td>Returns to Step 1</td></tr>
+        <tr><td>Permanently Delete Button</td><td>Button (rose)</td><td class="required-yes">Yes</td><td>—</td><td>Enabled only when input matches email; shows "Deleting…" spinner</td></tr>
+      </tbody>
+    </table>
+    <div class="label">Logic</div>
+    <ol class="logic-list">
+      <li>Modal opens at z-[100] with a blurred backdrop; clicking backdrop calls onCancel.</li>
+      <li>Step 1 displays consequence list; "Yes, continue" sets step = 2.</li>
+      <li>Step 2: input value compared case-insensitively against user.email on every keystroke.</li>
+      <li>"Permanently Delete" button disabled until matches === true.</li>
+      <li>On confirm: deleteAccount() called — fires DELETE /auth/delete/{userId} — then logout() clears all state.</li>
+      <li>After deletion, parent calls navigate('/'), redirecting to the public homepage.</li>
+    </ol>
+  </div>
+</div>
+
+<div style="margin-top:60px;padding-top:20px;border-top:1.5px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:11px;">
+  GENTEK &mdash; UI/UX Storyboard &nbsp;&middot;&nbsp; Version 1.0.0 &nbsp;&middot;&nbsp; June 2026 &nbsp;&middot;&nbsp; All screenshots to be inserted above each table.
+</div>
+
+</body>
+</html>
