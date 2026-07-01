@@ -1,4 +1,12 @@
-/* Custom brain icon — same path used in GentekMark and favicon.svg */
+// ── GENTEK logo components ────────────────────────────────────────────────────
+// Three exports used throughout the app:
+//   BrainIcon   — raw SVG brain used in buttons and the favicon
+//   GentekMark  — brand-colored square container wrapping BrainIcon
+//   GentekWordmark — GentekMark + "GENTEK" text side by side
+
+// ── BrainIcon — custom SVG brain illustration ─────────────────────────────────
+// Used inside GentekMark and as the Analyze button icon (BrainIcon color="white").
+// faceColor controls the eye and smile color; color controls the lobe fill.
 export function BrainIcon({ size = 24, color = 'white', faceColor = '#0D9488' }) {
   return (
     <svg
@@ -35,14 +43,14 @@ export function BrainIcon({ size = 24, color = 'white', faceColor = '#0D9488' })
            L50 65
            Z"
       />
-      {/* Bottom base */}
+      {/* Bottom base — rounds off the brain stem */}
       <rect x="31" y="63" width="38" height="10" rx="5" fill={color} />
 
       {/* Face — left eye */}
       <circle cx="33" cy="40" r="4.5" fill={faceColor} />
       {/* Face — right eye */}
       <circle cx="67" cy="40" r="4.5" fill={faceColor} />
-      {/* Face — smile */}
+      {/* Face — smile arc */}
       <path
         d="M38 52 Q50 62 62 52"
         stroke={faceColor}
@@ -54,9 +62,11 @@ export function BrainIcon({ size = 24, color = 'white', faceColor = '#0D9488' })
   )
 }
 
+// ── GentekMark — brand square icon (used in sidebar header, modals, favicon) ──
+// Size controls both the container and the inner brain proportionally.
 export function GentekMark({ size = 36, className = '' }) {
-  const radius = Math.round(size * 0.28)
-  const iconSize = Math.round(size * 0.62)
+  const radius   = Math.round(size * 0.28)   // rounded corner scales with size
+  const iconSize = Math.round(size * 0.62)   // brain fills ~62% of the container
   return (
     <div
       className={`flex-shrink-0 flex items-center justify-center bg-brand-600 ${className}`}
@@ -68,6 +78,8 @@ export function GentekMark({ size = 36, className = '' }) {
   )
 }
 
+// ── GentekWordmark — horizontal logo + "GENTEK" text (used in Navbar, Footer) ─
+// "GEN" is gray-900/white, "TEK" is brand-600 for the brand accent.
 export function GentekWordmark({ size = 36, textSize = 'text-lg', className = '' }) {
   return (
     <div className={`flex items-center gap-2.5 ${className}`}>

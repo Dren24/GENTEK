@@ -1,3 +1,8 @@
+// ── AboutPage — full-page About GENTEK content ────────────────────────────────
+// Five sections: Hero, Mission & Vision cards, Product details + stats card,
+// Who It's For audience grid, and a bottom CTA strip.
+// Also shown inside HelpModal as a condensed version for logged-in users.
+
 import { Link } from 'react-router-dom'
 import { Target, Eye, ArrowRight, Lightbulb, Globe, Users } from '@phosphor-icons/react'
 import { GentekMark } from '../components/shared/GentekLogo'
@@ -6,9 +11,9 @@ export default function AboutPage() {
   return (
     <main className="pt-16 bg-white dark:bg-gray-950">
 
-      {/* Hero */}
-      <section className="py-20 bg-hero-gradient">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center reveal">
+      {/* ── Hero section — page title and tagline ───────────────────────── */}
+      <section className="pt-14 pb-2 bg-hero-gradient">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <p className="section-label mb-3">About GENTEK</p>
           <h1 className="text-5xl font-bold text-gray-900 dark:text-white mb-5">
             Promoting Inclusive Writing<br />
@@ -20,10 +25,11 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Mission & Vision */}
-      <section className="py-20 bg-white dark:bg-gray-950">
+      {/* ── Mission & Vision cards — side by side on md+ screens ─────────── */}
+      <section className="pt-8 pb-14 bg-white dark:bg-gray-950">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-2 gap-8">
+            {/* Mission card — crosshair Target icon */}
             <div className="reveal card card-hover p-8">
               <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
                 <Target size={24} weight="duotone" className="text-brand-600" />
@@ -33,6 +39,7 @@ export default function AboutPage() {
                 To build an accessible, AI-driven tool that empowers students, professionals, writers, and organizations to identify and eliminate gender-biased language from their written communication. Inclusive language promotes equality, reduces stereotypes, and creates a fairer world.
               </p>
             </div>
+            {/* Vision card — Eye icon */}
             <div className="reveal reveal-delay-2 card card-hover p-8">
               <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-5">
                 <Eye size={24} weight="duotone" className="text-blue-600" />
@@ -46,8 +53,8 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* About the product */}
-      <section className="py-20 bg-gray-50 dark:bg-gray-900">
+      {/* ── About the Product — feature tiles + stats card ───────────────── */}
+      <section className="py-14 bg-gray-50 dark:bg-gray-900">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-14 items-center">
             <div className="reveal">
@@ -62,6 +69,7 @@ export default function AboutPage() {
               <p className="text-gray-500 dark:text-gray-400 leading-relaxed mb-7">
                 Using Natural Language Processing and machine learning, GENTEK analyzes text and classifies it as Male-Biased, Female-Biased, or Gender-Neutral — then provides specific, actionable suggestions to help writers improve the inclusivity of their work instantly.
               </p>
+              {/* Feature highlight tiles — 2×2 grid */}
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { icon: null,     color: 'text-brand-600', bg: 'bg-brand-50 dark:bg-brand-900/30', label: 'NLP-Powered Analysis' },
@@ -82,7 +90,7 @@ export default function AboutPage() {
               </div>
             </div>
 
-            {/* Product stats card */}
+            {/* Product stats card — photo + key numbers table */}
             <div className="reveal reveal-delay-2">
               <div className="card p-6 space-y-5">
                 <img
@@ -94,6 +102,7 @@ export default function AboutPage() {
                   <p className="font-bold text-gray-900 dark:text-white mb-0.5">GENTEK — AI Gender Bias Detector</p>
                   <p className="text-sm text-gray-400 dark:text-gray-500">Helping writers communicate more fairly, every day.</p>
                 </div>
+                {/* Quick facts table */}
                 <div className="space-y-2.5">
                   {[
                     { label: 'Bias Patterns',     value: '19+ detected' },
@@ -114,8 +123,8 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Who it's for */}
-      <section className="py-20 bg-white dark:bg-gray-950">
+      {/* ── Who It's For — four audience type cards ──────────────────────── */}
+      <section className="py-14 bg-white dark:bg-gray-950">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="reveal mb-12">
             <p className="section-label mb-3">Who It's For</p>
@@ -124,14 +133,15 @@ export default function AboutPage() {
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {[
-              { icon: Users,    label: 'Students',      desc: 'Review essays, thesis papers, and academic work before submission.', color: 'text-brand-600', bg: 'bg-brand-50 dark:bg-brand-900/30' },
-              { icon: null,     label: 'HR Teams',       desc: 'Write inclusive job postings that attract a diverse talent pool.',     color: 'text-blue-600',  bg: 'bg-blue-50 dark:bg-blue-900/30' },
-              { icon: Target,   label: 'Writers',        desc: 'Produce fair, balanced content for blogs, journalism, and media.',     color: 'text-rose-600',  bg: 'bg-rose-50 dark:bg-rose-900/30' },
-              { icon: Globe,    label: 'Researchers',    desc: 'Maintain objectivity in papers, surveys, and publications.',           color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/30' },
+              { icon: Users,  label: 'Students',   desc: 'Review essays, thesis papers, and academic work before submission.', color: 'text-brand-600', bg: 'bg-brand-50 dark:bg-brand-900/30' },
+              { icon: null,   label: 'HR Teams',   desc: 'Write inclusive job postings that attract a diverse talent pool.',    color: 'text-blue-600',  bg: 'bg-blue-50 dark:bg-blue-900/30' },
+              { icon: Target, label: 'Writers',    desc: 'Produce fair, balanced content for blogs, journalism, and media.',    color: 'text-rose-600',  bg: 'bg-rose-50 dark:bg-rose-900/30' },
+              { icon: Globe,  label: 'Researchers',desc: 'Maintain objectivity in papers, surveys, and publications.',          color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/30' },
             ].map((item) => {
               const Icon = item.icon
               return (
                 <div key={item.label} className="reveal card card-hover p-6 text-left">
+                  {/* Audience icon badge */}
                   <div className={`w-11 h-11 rounded-xl ${item.bg} flex items-center justify-center mb-4`}>
                     {Icon ? <Icon size={22} weight="duotone" className={item.color} /> : <GentekMark size={28} />}
                   </div>
@@ -144,13 +154,14 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Bottom CTA */}
-      <section className="py-16 bg-brand-50 dark:bg-brand-900/20 text-center reveal">
+      {/* ── Bottom CTA — drives users to the detector ────────────────────── */}
+      <section className="py-12 bg-brand-50 dark:bg-brand-900/20 text-center reveal">
         <div className="max-w-2xl mx-auto px-4">
           <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">Try GENTEK for Free</h2>
           <p className="text-gray-500 dark:text-gray-400 mb-7 text-lg leading-relaxed">
             Paste your text and get instant gender bias analysis — no account required.
           </p>
+          {/* Link to /detector redirects to / (HomePage with editor) */}
           <Link to="/detector" className="btn-primary inline-flex">
             Open the Detector
             <ArrowRight size={15} weight="bold" />

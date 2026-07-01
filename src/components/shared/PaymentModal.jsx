@@ -1,9 +1,15 @@
+// ── PaymentModal — payment form for upgrading to Premium ──────────────────────
+// Stacks on top of PricingModal at z-70. Four payment methods: GCash, Maya,
+// Bank Transfer, Credit/Debit Card. After submit shows SuccessScreen.
+// All payment details are UI-only — no real payment gateway is wired up yet.
+
 import { useState } from 'react'
 import {
   X, CheckCircle, CreditCard, Bank, Copy, ArrowRight,
   Check, UploadSimple, Warning,
 } from '@phosphor-icons/react'
 
+// ── Payment method tab definitions ────────────────────────────────────────────
 const METHODS = [
   { id: 'gcash',    label: 'GCash',          color: '#0070BA' },
   { id: 'maya',     label: 'Maya',           color: '#38A169' },
@@ -11,8 +17,10 @@ const METHODS = [
   { id: 'card',     label: 'Card',           color: '#4F46E5' },
 ]
 
+// ── Philippine bank options for the Bank Transfer form ────────────────────────
 const BANKS = ['BDO', 'BPI', 'UnionBank', 'Metrobank', 'Security Bank', 'RCBC']
 
+// ── GCashForm — QR/number send instructions for GCash e-wallet ───────────────
 function GCashForm({ amount, name }) {
   const [copied, setCopied] = useState(false)
   const number = '0917-123-4567'
@@ -20,23 +28,24 @@ function GCashForm({ amount, name }) {
 
   return (
     <div className="space-y-4">
-      {/* Logo strip */}
+      {/* GCash brand strip */}
       <div className="flex items-center justify-center h-14 rounded-xl bg-[#0070BA]/10 border border-[#0070BA]/20">
         <span className="text-2xl font-black text-[#0070BA] tracking-tight">G<span className="text-white">Cash</span></span>
       </div>
 
-      {/* Amount */}
+      {/* Amount to send — user must match exactly */}
       <div className="bg-gray-800 rounded-xl p-4 text-center">
         <p className="text-xs text-gray-400 mb-1">Send exactly</p>
         <p className="text-3xl font-extrabold text-white">₱{amount.toLocaleString()}</p>
         <p className="text-xs text-gray-400 mt-1">for {name} plan</p>
       </div>
 
-      {/* Number */}
+      {/* GCash number with copy-to-clipboard button */}
       <div>
         <p className="text-xs text-gray-400 mb-1.5">GCash Number</p>
         <div className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
           <span className="flex-1 text-white font-mono text-sm">{number}</span>
+          {/* Copy icon — turns into green check on success */}
           <button onClick={copy} className="text-gray-400 hover:text-white transition-colors">
             {copied ? <Check size={15} weight="bold" className="text-green-400" /> : <Copy size={15} />}
           </button>
@@ -44,7 +53,7 @@ function GCashForm({ amount, name }) {
         <p className="text-xs text-gray-500 mt-1.5">Account Name: <span className="text-gray-300">GENTEK Inc.</span></p>
       </div>
 
-      {/* Reference */}
+      {/* Reference number input — user pastes their GCash ref */}
       <div>
         <p className="text-xs text-gray-400 mb-1.5">Reference / Transaction Number</p>
         <input
@@ -53,12 +62,13 @@ function GCashForm({ amount, name }) {
         />
       </div>
 
-      {/* Upload */}
+      {/* Optional screenshot upload */}
       <label className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-dashed border-gray-600 hover:border-gray-400 cursor-pointer transition-colors">
         <UploadSimple size={16} className="text-gray-400" />
         <span className="text-sm text-gray-400">Upload screenshot (optional)</span>
       </label>
 
+      {/* Verification time notice */}
       <p className="flex items-start gap-1.5 text-[11px] text-gray-500">
         <Warning size={12} className="mt-0.5 flex-shrink-0 text-amber-500" />
         Your plan activates within 5–15 minutes after verification.
@@ -67,6 +77,7 @@ function GCashForm({ amount, name }) {
   )
 }
 
+// ── MayaForm — same pattern as GCashForm but Maya-branded ─────────────────────
 function MayaForm({ amount, name }) {
   const [copied, setCopied] = useState(false)
   const number = '0961-987-6543'
@@ -74,6 +85,7 @@ function MayaForm({ amount, name }) {
 
   return (
     <div className="space-y-4">
+      {/* Maya brand strip */}
       <div className="flex items-center justify-center h-14 rounded-xl bg-[#38A169]/10 border border-[#38A169]/20">
         <span className="text-2xl font-black text-[#38A169]">maya</span>
       </div>
@@ -111,8 +123,10 @@ function MayaForm({ amount, name }) {
   )
 }
 
+// ── BankForm — PH bank transfer with selectable bank and account details ───────
 function BankForm({ amount, name }) {
   const [bank, setBank] = useState('BDO')
+  // Static account details per bank — update when live accounts are assigned
   const details = {
     BDO:           { account: '006-780-123456', type: 'Savings' },
     BPI:           { account: '1234-5678-90',   type: 'Savings' },
@@ -126,12 +140,13 @@ function BankForm({ amount, name }) {
 
   return (
     <div className="space-y-4">
+      {/* Bank transfer brand strip */}
       <div className="flex items-center justify-center h-14 rounded-xl bg-amber-900/20 border border-amber-800/30">
         <Bank size={22} className="text-amber-400 mr-2" />
         <span className="text-base font-bold text-amber-300">Bank Transfer</span>
       </div>
 
-      {/* Bank selector */}
+      {/* Bank selector grid — 3 columns */}
       <div>
         <p className="text-xs text-gray-400 mb-1.5">Select your bank</p>
         <div className="grid grid-cols-3 gap-1.5">
@@ -151,7 +166,7 @@ function BankForm({ amount, name }) {
         </div>
       </div>
 
-      {/* Account details */}
+      {/* Account details table — updates when bank selection changes */}
       <div className="bg-gray-800 rounded-xl p-4 space-y-2.5">
         <div className="flex justify-between text-sm">
           <span className="text-gray-400">Account Name</span>
@@ -161,6 +176,7 @@ function BankForm({ amount, name }) {
           <span className="text-gray-400">Account Number</span>
           <div className="flex items-center gap-2">
             <span className="text-white font-mono font-medium">{details[bank].account}</span>
+            {/* Copy account number button */}
             <button onClick={copy} className="text-gray-400 hover:text-white">
               {copied ? <Check size={13} weight="bold" className="text-green-400" /> : <Copy size={13} />}
             </button>
@@ -176,6 +192,7 @@ function BankForm({ amount, name }) {
         </div>
       </div>
 
+      {/* Reference / trace number input */}
       <div>
         <p className="text-xs text-gray-400 mb-1.5">Reference / Trace Number</p>
         <input
@@ -183,6 +200,7 @@ function BankForm({ amount, name }) {
           className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-blue-500 transition-colors"
         />
       </div>
+      {/* Optional deposit slip upload */}
       <label className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-dashed border-gray-600 hover:border-gray-400 cursor-pointer transition-colors">
         <UploadSimple size={16} className="text-gray-400" />
         <span className="text-sm text-gray-400">Upload deposit slip (optional)</span>
@@ -195,15 +213,19 @@ function BankForm({ amount, name }) {
   )
 }
 
+// ── CardForm — credit/debit card entry with 16-digit number formatting ─────────
 function CardForm() {
   const [num, setNum] = useState('')
+  // Format raw digits as groups of 4 (e.g. "1234 5678 9012 3456")
   const fmt = v => v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
   return (
     <div className="space-y-4">
+      {/* Card brand strip */}
       <div className="flex items-center justify-center h-14 rounded-xl bg-indigo-900/20 border border-indigo-800/30">
         <CreditCard size={22} className="text-indigo-400 mr-2" />
         <span className="text-base font-bold text-indigo-300">Credit / Debit Card</span>
       </div>
+      {/* Card number field with auto-space formatting */}
       <div>
         <p className="text-xs text-gray-400 mb-1.5">Card Number</p>
         <input
@@ -213,6 +235,7 @@ function CardForm() {
           className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 transition-colors font-mono tracking-widest"
         />
       </div>
+      {/* Cardholder name — uppercase mirror of physical card */}
       <div>
         <p className="text-xs text-gray-400 mb-1.5">Cardholder Name</p>
         <input
@@ -220,6 +243,7 @@ function CardForm() {
           className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 transition-colors uppercase"
         />
       </div>
+      {/* Expiry + CVV side by side */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <p className="text-xs text-gray-400 mb-1.5">Expiry Date</p>
@@ -231,6 +255,7 @@ function CardForm() {
         </div>
         <div>
           <p className="text-xs text-gray-400 mb-1.5">CVV</p>
+          {/* Password type hides CVV digits visually */}
           <input
             placeholder="•••"
             maxLength={4}
@@ -239,6 +264,7 @@ function CardForm() {
           />
         </div>
       </div>
+      {/* SSL security notice */}
       <div className="flex items-center gap-2 text-[11px] text-gray-500 bg-gray-800/60 rounded-xl px-3 py-2.5">
         <span className="text-green-400">🔒</span>
         Secured by 256-bit SSL encryption. We never store your card details.
@@ -247,9 +273,11 @@ function CardForm() {
   )
 }
 
+// ── SuccessScreen — shown after user submits payment; replaces form ─────────────
 function SuccessScreen({ plan, onClose }) {
   return (
     <div className="flex flex-col items-center justify-center py-8 text-center space-y-4">
+      {/* Green checkmark with confetti emoji overlay */}
       <div className="relative">
         <div className="w-20 h-20 rounded-full bg-green-900/30 border-2 border-green-500 flex items-center justify-center">
           <CheckCircle size={40} weight="fill" className="text-green-400" />
@@ -263,6 +291,7 @@ function SuccessScreen({ plan, onClose }) {
           We'll notify you once it's confirmed.
         </p>
       </div>
+      {/* Status summary table */}
       <div className="w-full bg-gray-800 rounded-xl p-4 text-left space-y-2">
         {[
           { label: 'Status',    val: 'Pending verification',     color: 'text-amber-400' },
@@ -275,6 +304,7 @@ function SuccessScreen({ plan, onClose }) {
           </div>
         ))}
       </div>
+      {/* Back to GENTEK — closes PaymentModal */}
       <button
         onClick={onClose}
         className="w-full py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition-colors"
@@ -285,25 +315,27 @@ function SuccessScreen({ plan, onClose }) {
   )
 }
 
+// ════════════════════════ PAYMENT MODAL ══════════════════════════════════════
 export default function PaymentModal({ plan, onClose }) {
-  const [method, setMethod] = useState('gcash')
-  const [success, setSuccess] = useState(false)
+  const [method, setMethod] = useState('gcash')   // active payment method tab
+  const [success, setSuccess] = useState(false)   // true after submit → show SuccessScreen
 
   if (!plan) return null
 
+  // Active method's brand color — applied to Submit button background
   const methodColor = METHODS.find(m => m.id === method)?.color || '#3B82F6'
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
-      {/* Backdrop */}
+      {/* Backdrop — click to close */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Panel */}
+      {/* ── Modal panel — dark background (#0d1117 = GitHub-dark) ──────────── */}
       <div
         className="relative w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl"
         style={{ background: '#0d1117', animation: 'slideUp 0.25s cubic-bezier(0.16,1,0.3,1)' }}
       >
-        {/* Close */}
+        {/* Close X button — top-right corner */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 z-10 w-7 h-7 rounded-full bg-gray-800 hover:bg-gray-700 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
@@ -313,20 +345,21 @@ export default function PaymentModal({ plan, onClose }) {
 
         <div className="p-6 max-h-[90vh] overflow-y-auto">
           {success ? (
+            // ── Success screen replaces form after submit ──────────────────
             <SuccessScreen plan={plan.name} onClose={onClose} />
           ) : (
             <>
-              {/* Header */}
+              {/* ── Header — plan name + price ───────────────────────────── */}
               <div className="mb-5">
                 <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Upgrade to</p>
                 <h2 className="text-xl font-bold text-white">{plan.name} Plan</h2>
                 <p className="text-2xl font-extrabold text-white mt-0.5">
                   ₱{plan.price.toLocaleString()}
-                  <span className="text-sm font-normal text-gray-400 ml-1">{plan.period}</span>
+                  <span className="text-sm font-normal text-gray-400 ml-1">{plan.period ?? '/month'}</span>
                 </p>
               </div>
 
-              {/* Payment method tabs */}
+              {/* ── Payment method tabs — GCash / Maya / Bank / Card ─────── */}
               <div className="mb-5">
                 <p className="text-xs text-gray-400 mb-2">Payment method</p>
                 <div className="grid grid-cols-4 gap-1.5">
@@ -347,7 +380,7 @@ export default function PaymentModal({ plan, onClose }) {
                 </div>
               </div>
 
-              {/* Form */}
+              {/* ── Active payment form — swaps based on selected method ─── */}
               <div className="mb-5">
                 {method === 'gcash' && <GCashForm amount={plan.price} name={plan.name} />}
                 {method === 'maya'  && <MayaForm  amount={plan.price} name={plan.name} />}
@@ -355,7 +388,7 @@ export default function PaymentModal({ plan, onClose }) {
                 {method === 'card'  && <CardForm />}
               </div>
 
-              {/* Pay button */}
+              {/* ── Submit button — color matches active payment method ───── */}
               <button
                 onClick={() => setSuccess(true)}
                 className="w-full py-3 rounded-xl text-white font-bold text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-95"

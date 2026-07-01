@@ -1,8 +1,14 @@
+// ── AuthModal — login / signup / forgot password modal ───────────────────────
+// Opened by Navbar's "Log in" or "Sign up" buttons and the homepage CTA.
+// Four internal views: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
+// Pressing Escape or clicking outside closes the modal.
+
 import { useState, useEffect } from 'react'
 import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, PaperPlaneTilt } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
 
+// ── GoogleIcon — SVG inline so no extra dependency ────────────────────────────
 function GoogleIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -24,19 +30,23 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [form, setForm]         = useState({ name: '', email: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
 
+  // ── Escape key closes modal ───────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
+  // ── Lock body scroll while modal is open ──────────────────────────────────
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  const set = (field) => (e) => { setForm({ ...form, [field]: e.target.value }); setError('') }
+  // ── Controlled input helper — clears error on every keystroke ────────────
+  const set = (field) => (e) => { const val = e.target.value; setForm(prev => ({ ...prev, [field]: val })); setError('') }
 
+  // ── handleAuth — submit login or signup form ──────────────────────────────
   const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -47,7 +57,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
       } else {
         await login(form.email, form.password)
       }
-      setView('done')
+      onClose()   // close modal immediately on success
     } catch (err) {
       setError(err.message)
     } finally {
@@ -55,18 +65,21 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     }
   }
 
+  // ── handleForgot — simulates sending a reset email (no real email yet) ────
   const handleForgot = (e) => {
     e.preventDefault()
     setLoading(true)
     setTimeout(() => { setLoading(false); setView('forgot-sent') }, 1400)
   }
 
+  // ── switchTab — change between login/signup, reset form state ────────────
   const switchTab = (t) => {
     setView(t)
     setShowPass(false)
     setLoading(false)
   }
 
+  // ── Shared input class — used for all text/email/password fields ──────────
   const inputCls = "w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
 
   return (
@@ -74,11 +87,13 @@ export default function AuthModal({ mode = 'signup', onClose }) {
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
+      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
+      {/* ── Modal card ──────────────────────────────────────────────────── */}
       <div className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-up">
 
-        {/* Close button */}
+        {/* Close button — top-right corner */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors z-10"
@@ -86,9 +101,10 @@ export default function AuthModal({ mode = 'signup', onClose }) {
           <X size={16} weight="bold" />
         </button>
 
-        {/* ── SUCCESS ── */}
+        {/* ── SUCCESS view — shown after login or signup ─────────────────── */}
         {view === 'done' && (
           <div className="p-10 flex flex-col items-center text-center">
+            {/* GENTEK logo confirmation icon */}
             <div className="w-16 h-16 rounded-2xl bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
               <GentekMark size={44} />
             </div>
@@ -96,15 +112,17 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
               Your GENTEK account is ready. Start detecting gender bias now.
             </p>
+            {/* Go to Workspace closes modal */}
             <button onClick={onClose} className="btn-primary px-8 py-2.5">
               Go to Workspace
             </button>
           </div>
         )}
 
-        {/* ── FORGOT — EMAIL SENT ── */}
+        {/* ── FORGOT-SENT view — confirmation that reset email was sent ─────── */}
         {view === 'forgot-sent' && (
           <div className="p-10 flex flex-col items-center text-center">
+            {/* Paper plane icon signals "email sent" */}
             <div className="w-16 h-16 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
               <PaperPlaneTilt size={30} weight="duotone" className="text-brand-600" />
             </div>
@@ -112,6 +130,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
               We sent a password reset link to
             </p>
+            {/* Shows the email address they submitted */}
             <p className="text-sm font-semibold text-brand-600 dark:text-brand-400 mb-6 break-all">
               {resetEmail}
             </p>
@@ -133,9 +152,10 @@ export default function AuthModal({ mode = 'signup', onClose }) {
           </div>
         )}
 
-        {/* ── FORGOT PASSWORD FORM ── */}
+        {/* ── FORGOT view — email input form for password reset ─────────────── */}
         {view === 'forgot' && (
           <>
+            {/* Header with logo */}
             <div className="px-8 pt-8 pb-5 text-center">
               <div className="flex justify-center mb-4">
                 <GentekMark size={44} />
@@ -146,8 +166,10 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               </p>
             </div>
 
+            {/* Reset form body */}
             <div className="px-8 pb-8 space-y-4">
               <form onSubmit={handleForgot} className="space-y-3">
+                {/* Email field */}
                 <div className="relative">
                   <EnvelopeSimple size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
@@ -161,6 +183,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   />
                 </div>
 
+                {/* Send reset link button */}
                 <button
                   type="submit"
                   disabled={loading}
@@ -178,6 +201,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                 </button>
               </form>
 
+              {/* Back to login link */}
               <button
                 onClick={() => switchTab('login')}
                 className="w-full flex items-center justify-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors pt-1"
@@ -189,9 +213,10 @@ export default function AuthModal({ mode = 'signup', onClose }) {
           </>
         )}
 
-        {/* ── LOGIN / SIGNUP ── */}
+        {/* ── LOGIN / SIGNUP views ─────────────────────────────────────────── */}
         {(view === 'login' || view === 'signup') && (
           <>
+            {/* Header with logo and headline */}
             <div className="px-8 pt-8 pb-6 text-center">
               <div className="flex justify-center mb-4">
                 <GentekMark size={44} />
@@ -206,7 +231,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               </p>
             </div>
 
-            {/* Tab switcher */}
+            {/* ── Tab switcher — Log in / Sign up toggle ──────────────────── */}
             <div className="mx-8 mb-6 flex bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
               {['login', 'signup'].map(t => (
                 <button
@@ -224,19 +249,22 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             </div>
 
             <div className="px-8 pb-8 space-y-4">
-              {/* Google */}
+              {/* ── Google OAuth button (UI only — not wired to real OAuth yet) ── */}
               <button className="w-full flex items-center justify-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                 <GoogleIcon />
                 Continue with Google
               </button>
 
+              {/* OR divider */}
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
                 <span className="text-xs text-gray-400 dark:text-gray-500">or</span>
                 <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
               </div>
 
+              {/* ── Email + password form ─────────────────────────────────── */}
               <form onSubmit={handleAuth} className="space-y-3">
+                {/* Full name field — signup only */}
                 {view === 'signup' && (
                   <div className="relative">
                     <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -251,6 +279,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   </div>
                 )}
 
+                {/* Email field */}
                 <div className="relative">
                   <EnvelopeSimple size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
@@ -263,6 +292,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   />
                 </div>
 
+                {/* Password field with show/hide toggle */}
                 <div className="relative">
                   <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
@@ -273,6 +303,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                     required
                     className={`${inputCls} pr-10`}
                   />
+                  {/* Eye toggle — show/hide password */}
                   <button
                     type="button"
                     onClick={() => setShowPass(s => !s)}
@@ -282,7 +313,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   </button>
                 </div>
 
-                {/* Forgot password link — login only */}
+                {/* Forgot password link — login view only */}
                 {view === 'login' && (
                   <div className="flex justify-end">
                     <button
@@ -295,12 +326,14 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   </div>
                 )}
 
+                {/* Error message banner */}
                 {error && (
                   <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">
                     {error}
                   </p>
                 )}
 
+                {/* Submit button — calls login or register depending on view */}
                 <button
                   type="submit"
                   disabled={loading}
@@ -318,6 +351,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                 </button>
               </form>
 
+              {/* Terms & Privacy notice — signup only */}
               {view === 'signup' && (
                 <p className="text-center text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
                   By signing up you agree to our{' '}

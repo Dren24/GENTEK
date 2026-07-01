@@ -1,3 +1,14 @@
+import re
+
+# ── analyzer.py — NLP bias analysis engine ────────────────────────────────────
+# Single public function: analyze(text) → dict
+# Called by /analyze endpoint in main.py.
+# Detection is keyword-based (exact word match in lowercase text).
+# Score formula is intentionally simple — increase multipliers for tuning.
+
+# ── BIAS_PATTERNS — 19 bias words with type, swap suggestion, and reason ──────
+# type: "male" | "female" | "stereotype"
+# Patterns cover occupational titles, gendered nouns, and behavioral stereotypes.
 BIAS_PATTERNS = [
     {"word": "chairman",         "type": "male",       "suggestion": "chairperson",          "reason": "Gendered occupational title"},
     {"word": "manpower",         "type": "male",       "suggestion": "workforce",             "reason": "Male-centric compound noun"},
@@ -20,23 +31,35 @@ BIAS_PATTERNS = [
     {"word": "aggressive",       "type": "stereotype", "suggestion": "assertive",             "reason": "Often applied unfairly by gender context"},
 ]
 
+# ── COLOR_MAP — hex colors used by the frontend ResultsPanel score ring ────────
 COLOR_MAP = {
-    "MALE-BIASED":    "#3B82F6",
-    "FEMALE-BIASED":  "#F43F5E",
-    "GENDER-NEUTRAL": "#0D9488",
-    "MIXED-BIAS":     "#F59E0B",
+    "MALE-BIASED":    "#3B82F6",   # blue-500
+    "FEMALE-BIASED":  "#F43F5E",   # rose-500
+    "GENDER-NEUTRAL": "#0D9488",   # teal-600
+    "MIXED-BIAS":     "#F59E0B",   # amber-500
 }
 
 
 def analyze(text: str) -> dict:
+    """
+    Analyze text for gender bias patterns.
+    Returns counts by type, a label, a 0–100 bias score, and matched patterns.
+    """
     lower = text.lower()
-    detected = [p for p in BIAS_PATTERNS if p["word"].lower() in lower]
 
+    # ── Pattern matching — word-boundary regex prevents false partial matches ─
+    # e.g. "mankind" must not match inside "unmankind" or "humankinds"
+    detected = [p for p in BIAS_PATTERNS if re.search(r'\b' + re.escape(p["word"].lower()) + r'\b', lower)]
+
+    # ── Count by bias type ────────────────────────────────────────────────
     male   = sum(1 for p in detected if p["type"] == "male")
     female = sum(1 for p in detected if p["type"] == "female")
     stereo = sum(1 for p in detected if p["type"] == "stereotype")
     words  = len(text.strip().split()) if text.strip() else 0
 
+    # ── Classification and score formula ─────────────────────────────────
+    # Score is capped at 95 to avoid false certainty.
+    # Stereotypes add weight to both male and female scores.
     if male > female and male > 0:
         label = "MALE-BIASED"
         score = min(95, 40 + male * 15 + stereo * 8)
@@ -44,19 +67,21 @@ def analyze(text: str) -> dict:
         label = "FEMALE-BIASED"
         score = min(95, 40 + female * 15 + stereo * 8)
     elif detected:
+        # Equal male/female counts or only stereotypes detected
         label = "MIXED-BIAS"
         score = min(95, 28 + len(detected) * 10)
     else:
+        # No bias patterns found
         label = "GENDER-NEUTRAL"
-        score = 4
+        score = 4   # near-zero, not exactly 0 to avoid empty ring display
 
     return {
-        "detected": detected,
-        "male":     male,
-        "female":   female,
-        "stereo":   stereo,
-        "label":    label,
-        "score":    score,
-        "color":    COLOR_MAP[label],
-        "words":    words,
+        "detected": detected,   # list of matched pattern dicts
+        "male":     male,       # count of male-type matches
+        "female":   female,     # count of female-type matches
+        "stereo":   stereo,     # count of stereotype matches
+        "label":    label,      # classification string
+        "score":    score,      # bias severity 0–100
+        "color":    COLOR_MAP[label],   # hex color for frontend ring
+        "words":    words,      # word count of input text
     }
