@@ -25,6 +25,8 @@ COLOR_MAP = {
     "MIXED-BIAS":     "#F59E0B",
 }
 
+VALID_TYPES = {"male", "female", "stereotype"}
+
 # ── BIAS_PATTERNS — keyword fallback when LLM is unavailable ─────────────────
 BIAS_PATTERNS = [
     {"word": "chairman",          "type": "male",       "suggestion": "chairperson",           "reason": "Gendered occupational title"},
@@ -121,11 +123,19 @@ def _llm_analyze(text: str) -> Optional[dict]:
         if result.get("classification") not in COLOR_MAP:
             return None
 
-        # Keep only detected items whose phrase actually appears in the text
+        # Keep only detected items whose phrase actually appears in the text.
+        # This prevents the LLM from inventing findings or flagging neutral rewrites
+        # that are not present in the submitted text.
         lower = text.lower()
         result["detected"] = [
             d for d in result.get("detected", [])
-            if d.get("word") and d["word"].lower() in lower
+            if (
+                d.get("word")
+                and d["word"].lower() in lower
+                and d.get("type") in VALID_TYPES
+                and d.get("suggestion")
+                and d.get("reason")
+            )
         ]
 
         return result
@@ -148,10 +158,52 @@ def _pattern_analyze(text: str) -> dict:
     elif detected:
         label = "MIXED-BIAS";   score = min(95, 28 + len(detected) * 10)
     else:
-        label = "GENDER-NEUTRAL"; score = 4
+        label = "GENDER-NEUTRAL"; score = 0
 
     return {"detected": detected, "label": label, "score": score,
             "male": male, "female": female, "stereo": stereo}
+
+
+def _normalize_result(result: dict) -> dict:
+    """Derive a consistent label and score from validated detections."""
+    detected = result.get("detected", [])
+    male     = sum(1 for d in detected if d.get("type") == "male")
+    female   = sum(1 for d in detected if d.get("type") == "female")
+    stereo   = sum(1 for d in detected if d.get("type") == "stereotype")
+
+    if not detected:
+        return {
+            "detected": [],
+            "male": 0,
+            "female": 0,
+            "stereo": 0,
+            "label": "GENDER-NEUTRAL",
+            "score": 0,
+        }
+
+    if male > female and male > 0:
+        label = "MALE-BIASED"
+    elif female > male and female > 0:
+        label = "FEMALE-BIASED"
+    else:
+        label = "MIXED-BIAS"
+
+    try:
+        raw_score = int(result.get("score", 0))
+    except (TypeError, ValueError):
+        raw_score = 0
+
+    fallback_score = min(95, 28 + len(detected) * 10) if label == "MIXED-BIAS" else min(95, 40 + max(male, female) * 15 + stereo * 8)
+    score = min(95, max(1, raw_score or fallback_score))
+
+    return {
+        "detected": detected,
+        "male": male,
+        "female": female,
+        "stereo": stereo,
+        "label": label,
+        "score": score,
+    }
 
 
 def analyze(text: str) -> dict:
@@ -161,19 +213,15 @@ def analyze(text: str) -> dict:
     llm = _llm_analyze(text)
 
     if llm:
-        detected = llm["detected"]
-        label    = llm["classification"]
-        score    = min(95, max(4, int(llm.get("score", 50))))
-        male     = sum(1 for d in detected if d.get("type") == "male")
-        female   = sum(1 for d in detected if d.get("type") == "female")
-        stereo   = sum(1 for d in detected if d.get("type") == "stereotype")
+        normalized = _normalize_result(llm)
+        label      = normalized["label"]
         return {
-            "detected":   detected,
-            "male":       male,
-            "female":     female,
-            "stereo":     stereo,
+            "detected":   normalized["detected"],
+            "male":       normalized["male"],
+            "female":     normalized["female"],
+            "stereo":     normalized["stereo"],
             "label":      label,
-            "score":      score,
+            "score":      normalized["score"],
             "color":      COLOR_MAP[label],
             "words":      words,
             "ai_powered": True,
@@ -187,7 +235,7 @@ def analyze(text: str) -> dict:
         "female":     p["female"],
         "stereo":     p["stereo"],
         "label":      p["label"],
-        "score":      min(95, max(4, p["score"])),
+        "score":      min(95, max(0, p["score"])),
         "color":      COLOR_MAP[p["label"]],
         "words":      words,
         "ai_powered": False,

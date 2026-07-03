@@ -51,12 +51,12 @@ function escapeRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 function analyse(text) {
   const lower  = text.toLowerCase()
   const found  = BIAS_PATTERNS.filter(p => lower.includes(p.word.toLowerCase()))
-  if (!found.length) return { score: 95, verdict: 'NEUTRAL', findings: [] }
+  if (!found.length) return { score: 0, verdict: 'NEUTRAL', findings: [] }
   const maleC  = found.filter(f => f.type === 'male').length
   const femaleC= found.filter(f => f.type === 'female').length
   const stereoC= found.filter(f => f.type === 'stereotype').length
   const penalty= found.reduce((a, f) => a + (f.severity === 'high' ? 18 : f.severity === 'medium' ? 12 : 6), 0)
-  const score  = Math.max(5, 100 - penalty)
+  const score  = Math.min(95, Math.max(1, penalty))
   let verdict  = 'NEUTRAL'
   if (maleC > femaleC && maleC > stereoC)    verdict = 'MALE-BIASED'
   else if (femaleC > maleC && femaleC > stereoC) verdict = 'FEMALE-BIASED'

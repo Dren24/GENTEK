@@ -59,12 +59,16 @@ const SAMPLES = {
 
 // ── runAnalysis — client-side analysis fallback (no server required) ──────────
 // Mirrors the scoring logic in backend/analyzer.py — keep them in sync.
+function escapeRx(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function runAnalysis(text) {
-  const detected = BIAS_PATTERNS.filter(p => text.toLowerCase().includes(p.word.toLowerCase()))
+  const detected = BIAS_PATTERNS.filter(p => new RegExp(`\\b${escapeRx(p.word).replace(/\s+/g, '\\s+')}\\b`, 'i').test(text))
   const male   = detected.filter(p => p.type === 'male').length
   const female = detected.filter(p => p.type === 'female').length
   const stereo = detected.filter(p => p.type === 'stereotype').length
-  let label = 'GENDER-NEUTRAL', score = 4, color = '#0D9488'
+  let label = 'GENDER-NEUTRAL', score = 0, color = '#0D9488'
   if (male > female && male > 0)        { label = 'MALE-BIASED';   score = Math.min(95, 40 + male*15 + stereo*8); color = '#3B82F6' }
   else if (female > male && female > 0) { label = 'FEMALE-BIASED'; score = Math.min(95, 40 + female*15 + stereo*8); color = '#F43F5E' }
   else if (detected.length > 0)         { label = 'MIXED-BIAS';    score = 28 + detected.length*10; color = '#F59E0B' }
@@ -73,7 +77,7 @@ function runAnalysis(text) {
   detected.forEach(({ word, type }) => {
     const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
     // $& preserves the original casing from the text (gi flag makes it case-insensitive)
-    html = html.replace(new RegExp(`\\b${word.replace(/\s+/g,'\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
+    html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g,'\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
   })
   return { detected, male, female, stereo, label, score, color, html, words: text.trim().split(/\s+/).length }
 }
@@ -623,9 +627,33 @@ export default function HomePage() {
     detected.forEach(({ word, type }) => {
       const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
       // $& preserves original casing from the source text
-      html = html.replace(new RegExp(`\\b${word.replace(/\s+/g, '\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
+      html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g, '\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
     })
     return html
+  }
+
+  const normalizeApiResult = (data, inputText) => {
+    const detected = Array.isArray(data.detected) ? data.detected : []
+    const male = Number.isFinite(data.male) ? data.male : detected.filter(d => d.type === 'male').length
+    const female = Number.isFinite(data.female) ? data.female : detected.filter(d => d.type === 'female').length
+    const stereo = Number.isFinite(data.stereo) ? data.stereo : detected.filter(d => d.type === 'stereotype').length
+    const label = detected.length === 0
+      ? 'GENDER-NEUTRAL'
+      : data.label || (male > female ? 'MALE-BIASED' : female > male ? 'FEMALE-BIASED' : 'MIXED-BIAS')
+    const score = detected.length === 0 ? 0 : Math.min(95, Math.max(1, Number(data.score) || 0))
+
+    return {
+      ...data,
+      detected,
+      male,
+      female,
+      stereo,
+      label,
+      score,
+      color: data.color || (label === 'MALE-BIASED' ? '#3B82F6' : label === 'FEMALE-BIASED' ? '#F43F5E' : label === 'MIXED-BIAS' ? '#F59E0B' : '#0D9488'),
+      words: data.words || inputText.trim().split(/\s+/).length,
+      html: buildHtml(inputText, detected),
+    }
   }
 
   // ── saveToHistory — persist result to backend (skipped for temp sessions) ──
@@ -659,7 +687,8 @@ export default function HomePage() {
       })
       if (!res.ok) throw new Error('API error')
       const data = await res.json()
-      const r = { ...data, html: buildHtml(inputText, data.detected) }
+      if (data.error) throw new Error(data.error)
+      const r = normalizeApiResult(data, inputText)
       setResults(r)
       setAna(false)
       pushTextStack(inputText)
@@ -715,7 +744,7 @@ export default function HomePage() {
 
   // ── applyFix — replace a single bias word, then re-analyze ─────────────
   const applyFix = (word, suggestion) => {
-    const newText = text.replace(new RegExp(`\\b${word}\\b`, 'gi'), suggestion)
+    const newText = text.replace(new RegExp(`\\b${escapeRx(word)}\\b`, 'gi'), suggestion)
     setText(newText)
     analyzeText(newText)
   }
@@ -724,7 +753,7 @@ export default function HomePage() {
   const applyAllFixes = () => {
     if (!results) return
     let out = text
-    results.detected.forEach(d => { out = out.replace(new RegExp(`\\b${d.word}\\b`, 'gi'), d.suggestion) })
+    results.detected.forEach(d => { out = out.replace(new RegExp(`\\b${escapeRx(d.word)}\\b`, 'gi'), d.suggestion) })
     setText(out)
     analyzeText(out)
   }
