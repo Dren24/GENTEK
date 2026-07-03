@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.git/
+.claude/
+docs/
+backend/gentek.db
+backend/.env
+.env
+*.local
+.DS_Store

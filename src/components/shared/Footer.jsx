@@ -27,6 +27,13 @@ const COLS = [
       { label: 'Contact', href: '/contact' },
     ],
   },
+  {
+    title: 'Legal',
+    items: [
+      { label: 'Terms of Service', href: '/terms'   },
+      { label: 'Privacy Policy',   href: '/privacy' },
+    ],
+  },
 ]
 
 export default function Footer() {
@@ -58,7 +65,7 @@ export default function Footer() {
 
       {/* ── Main footer grid — brand column + link columns ───────────────── */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-10">
 
           {/* Brand column — logo, tagline, NLP badge */}
           <div className="col-span-2 md:col-span-2">
@@ -96,9 +103,11 @@ export default function Footer() {
       {/* ── Bottom bar — copyright + social icons ─────────────────────────── */}
       <div className="border-t border-gray-100 dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-gray-400 dark:text-gray-500">
-            &copy; 2026 GENTEK. All rights reserved. AI-powered inclusive writing for everyone.
-          </p>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
+            <span>&copy; 2026 GENTEK. All rights reserved.</span>
+            <Link to="/terms"   className="hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Terms</Link>
+            <Link to="/privacy" className="hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Privacy</Link>
+          </div>
           {/* Social icon links */}
           <div className="flex items-center gap-3">
             <a href="#" className="text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"><GithubLogo size={16} /></a>

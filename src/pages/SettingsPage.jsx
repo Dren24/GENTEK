@@ -7,10 +7,109 @@ import { useState } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import {
   User, EnvelopeSimple, Moon, Sun, SignOut, Trash,
-  Lock, Bell, ShieldCheck, FloppyDisk, Warning, X,
+  Lock, Bell, ShieldCheck, FloppyDisk, Warning, X, Eye, EyeSlash, CheckCircle,
 } from '@phosphor-icons/react'
 import { useAuth } from '../context/AuthContext'
 import { useDarkMode } from '../hooks/useDarkMode'
+
+// ── ChangePasswordModal — three fields: current, new, confirm password ────────
+function ChangePasswordModal({ userId, onClose }) {
+  const [form, setForm]     = useState({ current: '', newPass: '', confirm: '' })
+  const [showPass, setShow] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]   = useState('')
+  const [done, setDone]     = useState(false)
+
+  const inputCls = "w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (form.newPass.length < 6) { setError('New password must be at least 6 characters.'); return }
+    if (form.newPass !== form.confirm) { setError('Passwords do not match.'); return }
+    setLoading(true)
+    try {
+      const res = await fetch(`/auth/change-password/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: form.current, new_password: form.newPass }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to change password')
+      }
+      setDone(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const field = (key, placeholder, label) => (
+    <div>
+      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">{label}</label>
+      <div className="relative">
+        <Lock size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          type={showPass ? 'text' : 'password'}
+          placeholder={placeholder}
+          value={form[key]}
+          onChange={e => { setForm(f => ({ ...f, [key]: e.target.value })); setError('') }}
+          required
+          autoFocus={key === 'current'}
+          className={inputCls}
+        />
+        {key === 'confirm' && (
+          <button type="button" onClick={() => setShow(s => !s)}
+            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+            {showPass ? <EyeSlash size={14} /> : <Eye size={14} />}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-up">
+        <button onClick={onClose} className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <X size={14} weight="bold" />
+        </button>
+        <div className="p-8">
+          {done ? (
+            <div className="flex flex-col items-center text-center gap-4 py-4">
+              <div className="w-12 h-12 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
+                <CheckCircle size={24} weight="fill" className="text-brand-500" />
+              </div>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Password changed!</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Your password has been updated successfully.</p>
+              <button onClick={onClose} className="btn-primary px-8 py-2.5 mt-2">Done</button>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Change Password</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Enter your current password then choose a new one.</p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {field('current', 'Your current password', 'Current Password')}
+                {field('newPass', 'At least 6 characters',  'New Password')}
+                {field('confirm', 'Repeat new password',    'Confirm New Password')}
+                {error && (
+                  <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">{error}</p>
+                )}
+                <button type="submit" disabled={loading}
+                  className="w-full btn-primary justify-center py-3 text-sm disabled:opacity-60 disabled:cursor-not-allowed mt-1">
+                  {loading ? 'Updating…' : 'Update Password'}
+                </button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ── DeleteAccountModal — two-step confirmation before permanently deleting ─────
 // Step 1: warning screen. Step 2: type email to confirm.
@@ -136,14 +235,15 @@ function Row({ icon: Icon, label, desc, children }) {
 
 // ════════════════════════ SETTINGS PAGE ══════════════════════════════════════
 export default function SettingsPage() {
-  const { user, logout, updateUser, deleteAccount } = useAuth()
+  const { user, logout, updateUser, updateNotifications, deleteAccount } = useAuth()
   const [dark, setDark]  = useDarkMode()
   const navigate         = useNavigate()
 
   const [name, setName]     = useState(user?.name || '')
-  const [saved, setSaved]   = useState(false)                // transient "Saved!" feedback
-  const [notifications, setNotifications] = useState(true)   // email notification toggle
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [saved, setSaved]   = useState(false)
+  const [notifications, setNotifications] = useState(user?.email_notifications ?? true)
+  const [showDeleteModal, setShowDeleteModal]     = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
 
   // ── Redirect guests to homepage — settings requires auth ─────────────────
   // Must be after all hooks (Rules of Hooks)
@@ -247,7 +347,7 @@ export default function SettingsPage() {
           <Section title="Notifications">
             <Row icon={Bell} label="Email Notifications" desc="Receive tips and feature updates via email">
               <button
-                onClick={() => setNotifications(n => !n)}
+                onClick={() => { const next = !notifications; setNotifications(next); updateNotifications(next) }}
                 className={`relative w-11 h-6 rounded-full transition-colors ${notifications ? 'bg-brand-600' : 'bg-gray-300'}`}
               >
                 <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${notifications ? 'left-5.5 translate-x-0.5' : 'left-0.5'}`} />
@@ -259,7 +359,7 @@ export default function SettingsPage() {
           <Section title="Security">
             {/* Password change — text button link */}
             <Row icon={Lock} label="Password" desc="Change your account password">
-              <button className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">Change</button>
+              <button onClick={() => setShowPasswordModal(true)} className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">Change</button>
             </Row>
             {/* Two-Factor Auth — not yet implemented */}
             <Row icon={ShieldCheck} label="Two-Factor Auth" desc="Add an extra layer of security">
@@ -291,6 +391,14 @@ export default function SettingsPage() {
 
         </div>
       </div>
+
+      {/* ── Change password modal ─────────────────────────────────────────── */}
+      {showPasswordModal && (
+        <ChangePasswordModal
+          userId={user?.id}
+          onClose={() => setShowPasswordModal(false)}
+        />
+      )}
 
       {/* ── Two-step delete account confirmation modal ─────────────────────── */}
       {showDeleteModal && (

@@ -186,6 +186,19 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // ── updateNotifications — toggle email notifications and persist to DB ───────
+  const updateNotifications = async (value) => {
+    if (!user?.id) return
+    const updated = { ...user, email_notifications: value }
+    setUser(updated)
+    localStorage.setItem('gentek-user', JSON.stringify(updated))
+    await fetch(`/auth/notifications/${user.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email_notifications: value }),
+    }).catch(() => {})
+  }
+
   // ── deleteAccount — permanently remove account from DB then log out ─────────
   const deleteAccount = async () => {
     if (!user?.id) return
@@ -203,7 +216,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, login, register, logout, updateUser, deleteAccount,
+      user, login, register, logout, updateUser, updateNotifications, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,

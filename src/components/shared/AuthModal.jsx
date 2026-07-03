@@ -4,6 +4,7 @@
 // Pressing Escape or clicking outside closes the modal.
 
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, PaperPlaneTilt } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
@@ -23,6 +24,7 @@ function GoogleIcon() {
 // view: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
 export default function AuthModal({ mode = 'signup', onClose }) {
   const { login, register }     = useAuth()
+  const navigate                = useNavigate()
   const [view, setView]         = useState(mode)
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading]   = useState(false)
@@ -65,11 +67,32 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     }
   }
 
-  // ── handleForgot — simulates sending a reset email (no real email yet) ────
-  const handleForgot = (e) => {
+  // ── handleForgot — calls backend to send a real password reset email ────────
+  const handleForgot = async (e) => {
     e.preventDefault()
     setLoading(true)
-    setTimeout(() => { setLoading(false); setView('forgot-sent') }, 1400)
+    setError('')
+    try {
+      const res = await fetch('/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Something went wrong. Please try again.')
+      }
+      const data = await res.json()
+      const next = data.reset_url
+        ? new URL(data.reset_url, window.location.origin)
+        : new URL(`/reset-password?email=${encodeURIComponent(resetEmail)}`, window.location.origin)
+      onClose()
+      navigate(`${next.pathname}${next.search}`)
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   // ── switchTab — change between login/signup, reset form state ────────────

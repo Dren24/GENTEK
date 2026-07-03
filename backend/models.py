@@ -13,11 +13,12 @@ from database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id         = Column(Integer, primary_key=True, index=True)
-    name       = Column(String(100), nullable=False)
-    email      = Column(String(255), unique=True, index=True, nullable=False)
-    password   = Column(String(255), nullable=False)          # bcrypt hash
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id                   = Column(Integer, primary_key=True, index=True)
+    name                 = Column(String(100), nullable=False)
+    email                = Column(String(255), unique=True, index=True, nullable=False)
+    password             = Column(String(255), nullable=False)
+    email_notifications  = Column(Integer, default=1, server_default='1', nullable=False)
+    created_at           = Column(DateTime, default=datetime.utcnow)
 
     # ── Relationship: one user → many analyses (cascade delete) ───────────────
     analyses = relationship("Analysis", back_populates="user", cascade="all, delete")
@@ -40,3 +41,17 @@ class Analysis(Base):
 
     # ── Relationship: analysis → owner user ───────────────────────────────────
     user = relationship("User", back_populates="analyses")
+
+
+# ── PasswordResetToken table ──────────────────────────────────────────────────
+# Stores short-lived tokens emailed to users for password resets.
+# One active token per user — old tokens are deleted before a new one is issued.
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token      = Column(String(255), unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
+    user = relationship("User")

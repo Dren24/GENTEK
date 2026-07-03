@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from database import engine, Base
 from analyzer import analyze
@@ -16,13 +17,25 @@ import auth
 # ── Create DB tables on startup (no-op if they already exist) ─────────────────
 Base.metadata.create_all(bind=engine)
 
+# ── Migrate existing DB — add columns that didn't exist in earlier versions ────
+with engine.connect() as _conn:
+    for _sql in [
+        "ALTER TABLE users ADD COLUMN email_notifications INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE password_reset_tokens ADD COLUMN id INTEGER",  # no-op guard
+    ]:
+        try:
+            _conn.execute(text(_sql))
+            _conn.commit()
+        except Exception:
+            pass  # column already exists — safe to ignore
+
 # ── FastAPI app instance ──────────────────────────────────────────────────────
 app = FastAPI(title="GENTEK Bias Analyzer API", version="1.0.0")
 
 # ── CORS — allow Vite dev server and local React builds ──────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )

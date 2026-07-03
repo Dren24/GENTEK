@@ -13,8 +13,11 @@ import HomePage     from './pages/HomePage'
 import PricingPage  from './pages/PricingPage'
 import AboutPage    from './pages/AboutPage'
 import ContactPage  from './pages/ContactPage'
-import DashboardPage  from './pages/DashboardPage'
-import SettingsPage   from './pages/SettingsPage'
+import DashboardPage     from './pages/DashboardPage'
+import SettingsPage      from './pages/SettingsPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
+import TermsPage        from './pages/TermsPage'
+import PrivacyPage      from './pages/PrivacyPage'
 import { useAuth }  from './context/AuthContext'
 
 // ── ScrollToTop — resets scroll on route change, or scrolls to hash section ───
@@ -57,7 +60,7 @@ function useScrollReveal(user) {
 }
 
 // ── Pages that use their own full-screen layout (no shared navbar/footer/sidebar)
-const HIDE_SHELL = ['/detector', '/dashboard']
+const HIDE_SHELL = ['/detector', '/dashboard', '/reset-password']
 
 export default function App() {
   const { pathname }              = useLocation()
@@ -95,8 +98,18 @@ export default function App() {
           <Route path="/pricing"   element={<PricingPage />} />
           <Route path="/about"     element={<AboutPage />} />
           <Route path="/contact"   element={<ContactPage />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/settings"  element={<SettingsPage />} />
+          <Route path="/dashboard"      element={<DashboardPage />} />
+          <Route path="/settings"       element={<SettingsPage />} />
+          <Route path="/reset-password" element={
+            <>
+              <div className="pointer-events-none select-none overflow-hidden h-screen" aria-hidden="true">
+                <HomePage />
+              </div>
+              <ResetPasswordPage />
+            </>
+          } />
+          <Route path="/terms"          element={<TermsPage />} />
+          <Route path="/privacy"        element={<PrivacyPage />} />
         </Routes>
 
         {!hideShell && <Footer />}
