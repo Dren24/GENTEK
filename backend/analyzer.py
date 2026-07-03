@@ -76,6 +76,12 @@ def _llm_analyze(text: str) -> Optional[dict]:
     prompt = (
         "Analyze the following text for gender bias. "
         "Return ONLY a valid JSON object with no explanation, markdown, or extra text.\n\n"
+        "Rules:\n"
+        "- Only flag words or phrases that are CLEARLY gendered or biased (e.g. chairman, fireman, housewife, mankind, he/his used generically).\n"
+        "- Do NOT flag already gender-neutral terms like: businessperson, chairperson, salesperson, firefighter, police officer, "
+        "homemaker, workforce, humankind, they/them, or any -person compound words.\n"
+        "- Do NOT flag job titles that are already gender-neutral.\n"
+        "- If the text has no clear gender bias, return classification GENDER-NEUTRAL and empty detected array.\n\n"
         "Required JSON format:\n"
         "{\n"
         '  "classification": "MALE-BIASED" or "FEMALE-BIASED" or "MIXED-BIAS" or "GENDER-NEUTRAL",\n'
