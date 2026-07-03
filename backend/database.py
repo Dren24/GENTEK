@@ -1,16 +1,21 @@
 # ── Database configuration ────────────────────────────────────────────────────
-# Uses SQLite stored at ./gentek.db (relative to the backend/ folder).
-# check_same_thread=False is required for FastAPI because it runs async handlers
-# on different threads than the one that created the connection.
+# Uses PostgreSQL in production (DATABASE_URL env var set by Railway).
+# Falls back to local SQLite for development when DATABASE_URL is not set.
 
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = "sqlite:///./gentek.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./gentek.db")
 
-# ── Engine — single shared SQLite connection ──────────────────────────────────
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# Railway provides postgres:// but SQLAlchemy requires postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+# SQLite needs check_same_thread=False; PostgreSQL does not
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 # ── Session factory — one session per request, no auto-commit ─────────────────
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
