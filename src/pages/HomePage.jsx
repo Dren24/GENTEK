@@ -640,8 +640,9 @@ export default function HomePage() {
   }, [user, isTempSession, text, addToHistory, updateHistory])
 
   // ── analyze — calls /analyze API, falls back to client runAnalysis on error ──
-  const analyze = useCallback(async () => {
-    if (!text.trim() || wordCount < 3) return
+  // ── analyzeText — core analysis logic, accepts text directly ────────────
+  const analyzeText = useCallback(async (inputText) => {
+    if (!inputText.trim() || inputText.trim().split(/\s+/).length < 3) return
 
     // ── Guest limit: 2 free analyses. Third attempt → show login popup ─────
     if (!user && guestAnalysisCountRef.current >= 2) {
@@ -654,27 +655,27 @@ export default function HomePage() {
       const res = await fetch('/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: inputText }),
       })
       if (!res.ok) throw new Error('API error')
       const data = await res.json()
-      const r = { ...data, html: buildHtml(text, data.detected) }
+      const r = { ...data, html: buildHtml(inputText, data.detected) }
       setResults(r)
       setAna(false)
-      pushTextStack(text)
+      pushTextStack(inputText)
       saveToHistory(r)
     } catch {
-      // API unavailable — run analysis client-side
-      const r = runAnalysis(text)
+      const r = runAnalysis(inputText)
       setResults(r)
       setAna(false)
-      pushTextStack(text)
+      pushTextStack(inputText)
       saveToHistory(r)
     }
 
-    // Increment guest analysis count after a successful run
     if (!user) guestAnalysisCountRef.current += 1
-  }, [text, wordCount, saveToHistory, pushTextStack, user])
+  }, [user, saveToHistory, pushTextStack])
+
+  const analyze = useCallback(() => analyzeText(text), [analyzeText, text])
 
   // ── Keep analyzeRef current so setTimeout-based callers get the latest fn ──
   useEffect(() => { analyzeRef.current = analyze }, [analyze])
@@ -716,9 +717,7 @@ export default function HomePage() {
   const applyFix = (word, suggestion) => {
     const newText = text.replace(new RegExp(`\\b${word}\\b`, 'gi'), suggestion)
     setText(newText)
-    pushTextStack(newText)
-    setResults(null)
-    setTimeout(() => analyzeRef.current?.(), 80)
+    analyzeText(newText)
   }
 
   // ── applyAllFixes — replace all bias words, then re-analyze ──────────────
@@ -727,9 +726,7 @@ export default function HomePage() {
     let out = text
     results.detected.forEach(d => { out = out.replace(new RegExp(`\\b${d.word}\\b`, 'gi'), d.suggestion) })
     setText(out)
-    pushTextStack(out)
-    setResults(null)
-    setTimeout(() => analyzeRef.current?.(), 80)
+    analyzeText(out)
   }
 
   return (
