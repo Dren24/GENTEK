@@ -430,7 +430,7 @@ function ResultsPanel({ analyzing, results, text, onApply, onApplyAll }) {
 export default function HomePage() {
   const { user, addToHistory, updateHistory, deleteHistory, lastDeletedId, openPricing } = useAuth()
   // ── Guest word limit — enforced in onChange, counter turns red at 100 ────
-  const GUEST_WORD_LIMIT = 100
+  const GUEST_WORD_LIMIT = 300
   const location = useLocation()
   const [text, setText]          = useState('')
   const [analyzing, setAna]      = useState(false)
