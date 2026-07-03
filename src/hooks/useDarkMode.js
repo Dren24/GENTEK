@@ -14,7 +14,7 @@ export function useDarkMode() {
     if (typeof window === 'undefined') return false
     const stored = localStorage.getItem('gentek-theme')
     if (stored) return stored === 'dark'
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
+    return false
   })
 
   // ── Sync 'dark' class on <html>, persist, and notify other instances ──────
