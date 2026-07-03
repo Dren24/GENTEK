@@ -712,15 +712,16 @@ export default function HomePage() {
   // ── Keyboard shortcut — Cmd/Ctrl+Enter triggers analysis ─────────────────
   const handleKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); analyze() } }
 
-  // ── applyFix — replace a single bias word in the textarea ────────────────
+  // ── applyFix — replace a single bias word, then re-analyze ─────────────
   const applyFix = (word, suggestion) => {
     const newText = text.replace(new RegExp(`\\b${word}\\b`, 'gi'), suggestion)
     setText(newText)
     pushTextStack(newText)
     setResults(null)
+    setTimeout(() => analyzeRef.current?.(), 80)
   }
 
-  // ── applyAllFixes — replace all detected bias words at once ──────────────
+  // ── applyAllFixes — replace all bias words, then re-analyze ──────────────
   const applyAllFixes = () => {
     if (!results) return
     let out = text
@@ -728,6 +729,7 @@ export default function HomePage() {
     setText(out)
     pushTextStack(out)
     setResults(null)
+    setTimeout(() => analyzeRef.current?.(), 80)
   }
 
   return (
