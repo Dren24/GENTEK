@@ -100,6 +100,8 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     setView(t)
     setShowPass(false)
     setLoading(false)
+    setError('')
+    setForm({ name: '', email: '', password: '' })
   }
 
   // ── Shared input class — used for all text/email/password fields ──────────

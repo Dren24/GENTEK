@@ -1045,7 +1045,7 @@ export default function HomePage() {
                 <span className="text-gray-400 dark:text-gray-500 mb-1.5">/forever</span>
               </div>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Perfect for students and writers getting started.</p>
-              <button className="btn-outline w-full justify-center mb-6">Get Started Free</button>
+              <button onClick={() => setShowAuthPrompt(true)} className="btn-outline w-full justify-center mb-6">Get Started Free</button>
               <ul className="space-y-3 mt-auto">
                 {PLAN_FEATURES.map(f => (
                   <li key={f.label} className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-400">
@@ -1071,7 +1071,7 @@ export default function HomePage() {
                 <span className="text-gray-400 dark:text-gray-500 mb-1.5">/month</span>
               </div>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">For professionals, HR teams, and organizations.</p>
-              <button className="btn-primary w-full justify-center mb-6">
+              <button onClick={() => setShowAuthPrompt(true)} className="btn-primary w-full justify-center mb-6">
                 Start Pro Trial <ArrowRight size={14} weight="bold" />
               </button>
               <ul className="space-y-3 mt-auto">
