@@ -184,9 +184,9 @@ function UserPopup({ user, logout, onClose, onNavigate, onHelp }) {
         <button onClick={() => { onNavigate('/settings'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
           <Gear size={14} />Settings
         </button>
-        {/* Help — navigate to /about */}
+        {/* About — navigate to /about */}
         <button onClick={() => { onNavigate('/about'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
-          <Question size={14} />Help
+          <Question size={14} />About
         </button>
         {/* Sign out — red destructive action */}
         <button
@@ -442,9 +442,9 @@ export default function AppSidebar() {
             <button onClick={() => go('/settings')} className="w-full flex items-center gap-2.5 px-3 py-2 text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 rounded-xl transition-colors text-xs font-medium">
               <Gear size={16} className="flex-shrink-0" />Settings
             </button>
-            {/* Help — navigate to /about page */}
+            {/* About — navigate to /about page */}
             <button onClick={() => go('/about')} className="w-full flex items-center gap-2.5 px-3 py-2 text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 rounded-xl transition-colors text-xs font-medium">
-              <Question size={16} className="flex-shrink-0" />Help
+              <Question size={16} className="flex-shrink-0" />About
             </button>
             {/* Sign out — rose-colored destructive action */}
             <button onClick={() => { logout(); navigate('/') }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors text-xs font-medium">
@@ -458,8 +458,8 @@ export default function AppSidebar() {
             <button title="Settings" onClick={() => go('/settings')} className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors">
               <Gear size={16} />
             </button>
-            {/* Question mark icon — help / about */}
-            <button title="Help" onClick={() => go('/about')} className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors">
+            {/* Question mark icon — about */}
+            <button title="About" onClick={() => go('/about')} className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors">
               <Question size={16} />
             </button>
 
