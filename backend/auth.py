@@ -9,6 +9,7 @@ import bcrypt
 import secrets
 import smtplib
 import os
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -222,7 +223,7 @@ def send_reset_email(to_email: str, to_name: str, reset_url: str):
     msg["To"]      = to_email
     msg.attach(MIMEText(html, "html"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
         smtp.login(gmail_user, gmail_password)
         smtp.sendmail(gmail_user, to_email, msg.as_string())
 
@@ -245,10 +246,12 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
         db.commit()
         app_url   = os.getenv("APP_URL", "http://localhost:5173")
         reset_url = f"{app_url}/reset-password?token={token}"
-        try:
-            send_reset_email(user.email, user.name, reset_url)
-        except Exception:
-            pass
+        # Send email in background thread so the API response is never blocked
+        threading.Thread(
+            target=send_reset_email,
+            args=(user.email, user.name, reset_url),
+            daemon=True,
+        ).start()
     return {
         "message": "If that email exists, a reset link has been sent.",
         "reset_url": reset_url,
