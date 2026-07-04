@@ -85,6 +85,8 @@ BIAS_PATTERNS = [
     {"word": "women are naturally better","type": "female",   "suggestion": "people can excel",            "reason": "Implies female superiority in certain roles"},
     {"word": "women are better suited", "type": "female",     "suggestion": "individuals are well-suited", "reason": "Gender-based role assignment"},
     {"word": "nurturing",               "type": "female",     "suggestion": "supportive",                  "reason": "Gendered trait stereotype"},
+    {"word": "supportive roles",        "type": "stereotype", "suggestion": "various responsibilities",      "reason": "Implies certain people belong in support roles"},
+    {"word": "better suited to supportive", "type": "stereotype", "suggestion": "capable of",               "reason": "Gendered role assignment"},
 ]
 
 # Build a set of known-biased words for fast lookup
@@ -150,17 +152,18 @@ def _llm_analyze(text: str) -> Optional[List[Dict]]:
         if not isinstance(items, list):
             return []
 
-        # Validate: word must appear in text with word boundary, type must be valid
+        # Validate: word must appear in text, suggestion must differ, type must be valid
         lower = text.lower()
         clean = []
         for d in items:
             w = d.get("word", "").strip()
+            s = d.get("suggestion", "").strip()
             if (w
+                    and s
+                    and w.lower() != s.lower()          # skip word == suggestion (useless)
                     and d.get("type") in VALID_TYPES
-                    and d.get("suggestion")
                     and d.get("reason")
                     and re.search(r'\b' + re.escape(w.lower()) + r'\b', lower)
-                    # skip if it's a known-neutral term
                     and w.lower() not in NEUTRAL_TERMS):
                 clean.append(d)
         return clean
