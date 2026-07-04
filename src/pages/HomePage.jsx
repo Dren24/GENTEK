@@ -742,18 +742,30 @@ export default function HomePage() {
   // ── Keyboard shortcut — Cmd/Ctrl+Enter triggers analysis ─────────────────
   const handleKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); analyze() } }
 
+  // ── replaceBias — robust replacement that handles single words and phrases ──
+  const replaceBias = (src, word, suggestion) => {
+    // Sort longest-first to prevent partial-word clobbering across replacements
+    const escaped = escapeRx(word).replace(/\s+/g, '\\s+')
+    const rx = new RegExp(`(?<![\\w])${escaped}(?![\\w])`, 'gi')
+    const result = src.replace(rx, suggestion)
+    // If lookahead/behind didn't match (old browser), fall back to \b version
+    return result !== src ? result : src.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), suggestion)
+  }
+
   // ── applyFix — replace a single bias word, then re-analyze ─────────────
   const applyFix = (word, suggestion) => {
-    const newText = text.replace(new RegExp(`\\b${escapeRx(word)}\\b`, 'gi'), suggestion)
+    const newText = replaceBias(text, word, suggestion)
     setText(newText)
     analyzeText(newText)
   }
 
   // ── applyAllFixes — replace all bias words, then re-analyze ──────────────
   const applyAllFixes = () => {
-    if (!results) return
+    if (!results || !results.detected?.length) return
+    // Apply longest phrases first to avoid partial replacements
+    const sorted = [...results.detected].sort((a, b) => b.word.length - a.word.length)
     let out = text
-    results.detected.forEach(d => { out = out.replace(new RegExp(`\\b${escapeRx(d.word)}\\b`, 'gi'), d.suggestion) })
+    sorted.forEach(d => { out = replaceBias(out, d.word, d.suggestion) })
     setText(out)
     analyzeText(out)
   }
