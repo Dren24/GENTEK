@@ -149,10 +149,13 @@ export function AuthProvider({ children }) {
             classification: item.classification,
           }),
         })
-        const data = await res.json()
-        if (data.id && data.id !== localId) {
-          setHistory(prev => prev.map(h => h.id === localId ? { ...h, id: data.id } : h))
-          return data.id
+        // Only parse body when request succeeded — non-ok bodies may not be JSON
+        if (res.ok) {
+          const data = await res.json()
+          if (data.id && data.id !== localId) {
+            setHistory(prev => prev.map(h => h.id === localId ? { ...h, id: data.id } : h))
+            return data.id
+          }
         }
       } catch {}
     }

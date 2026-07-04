@@ -71,9 +71,9 @@ function runAnalysis(text) {
   let label = 'GENDER-NEUTRAL', score = 0, color = '#0D9488'
   if (male > female && male > 0)        { label = 'MALE-BIASED';   score = Math.min(95, 40 + male*15 + stereo*8); color = '#3B82F6' }
   else if (female > male && female > 0) { label = 'FEMALE-BIASED'; score = Math.min(95, 40 + female*15 + stereo*8); color = '#F43F5E' }
-  else if (detected.length > 0)         { label = 'MIXED-BIAS';    score = 28 + detected.length*10; color = '#F59E0B' }
-  // Build highlighted HTML — wrap each matched word in a <mark> with bias class
-  let html = text
+  else if (detected.length > 0)         { label = 'MIXED-BIAS';    score = Math.min(95, 28 + detected.length*10); color = '#F59E0B' }
+  // Build highlighted HTML — escape user text first to prevent XSS, then wrap bias words in <mark>
+  let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   detected.forEach(({ word, type }) => {
     const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
     // $& preserves the original casing from the text (gi flag makes it case-insensitive)
@@ -621,12 +621,12 @@ export default function HomePage() {
   const charCount = text.length
   const showPanel = analyzing || results   // true = two-column layout
 
-  // ── buildHtml — wraps matched bias words in <mark> tags for display ───────
+  // ── buildHtml — HTML-escapes user text first, then wraps bias words in <mark>
+  // Escaping first prevents XSS when text is injected via dangerouslySetInnerHTML.
   const buildHtml = (text, detected) => {
-    let html = text
+    let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     detected.forEach(({ word, type }) => {
       const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
-      // $& preserves original casing from the source text
       html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g, '\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
     })
     return html
@@ -679,6 +679,7 @@ export default function HomePage() {
     }
 
     setAna(true); setResults(null)
+    let succeeded = false
     try {
       const res = await fetch('/analyze', {
         method: 'POST',
@@ -693,15 +694,17 @@ export default function HomePage() {
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
+      succeeded = true
     } catch {
       const r = runAnalysis(inputText)
       setResults(r)
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
+      succeeded = true
     }
-
-    if (!user) guestAnalysisCountRef.current += 1
+    // Only count successful analyses against the guest quota
+    if (!user && succeeded) guestAnalysisCountRef.current += 1
   }, [user, saveToHistory, pushTextStack])
 
   const analyze = useCallback(() => analyzeText(text), [analyzeText, text])
@@ -925,11 +928,11 @@ export default function HomePage() {
                     {!user ? (
                       <>
                         {/* Guest word counter — red at limit, amber at 80% */}
-                        <span className={`font-semibold ${wordCount >= GUEST_WORD_LIMIT ? 'text-rose-500' : wordCount >= 80 ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        <span className={`font-semibold ${wordCount >= GUEST_WORD_LIMIT ? 'text-rose-500' : wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
                           {wordCount}/{GUEST_WORD_LIMIT} words
                         </span>
                         {/* "Upgrade for unlimited" nudge — shown at ≥80 words */}
-                        {wordCount >= 80 && (
+                        {wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) && (
                           <button
                             onClick={openPricing}
                             className="text-brand-600 dark:text-brand-400 hover:underline font-semibold"

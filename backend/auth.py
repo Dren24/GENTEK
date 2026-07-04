@@ -23,6 +23,9 @@ from models import User, Analysis, PasswordResetToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# ── Valid classification values — rejects unknown strings before DB insert ─────
+VALID_CLASSIFICATIONS = {"MALE-BIASED", "FEMALE-BIASED", "GENDER-NEUTRAL", "MIXED-BIAS"}
+
 
 # ── Request schemas (Pydantic) ────────────────────────────────────────────────
 
@@ -54,10 +57,12 @@ class AnalysisUpdate(BaseModel):
 # ── Password helpers ──────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
+    """Hash a plain-text password with bcrypt. Never store the plain value."""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, hashed: str) -> bool:
+    """Return True if password matches the bcrypt hash."""
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
@@ -66,6 +71,8 @@ def verify_password(password: str, hashed: str) -> bool:
 # 400 if the email is already registered.
 @router.post("/register")
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     user = User(
@@ -89,17 +96,21 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications)}
 
 
+# ── Update name schema — narrower than RegisterRequest (no password field) ────
+class UpdateNameRequest(BaseModel):
+    name: str
+
 # ── PUT /auth/update/{user_id} — update display name ─────────────────────────
-# Only the name field is updated. Email and password are not changed here.
+# Only the name field is updated. Returns full user object so frontend can refresh.
 @router.put("/update/{user_id}")
-def update_user(user_id: int, req: RegisterRequest, db: Session = Depends(get_db)):
+def update_user(user_id: int, req: UpdateNameRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.name = req.name
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "name": user.name, "email": user.email}
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications)}
 
 
 # ── PUT /auth/change-password/{user_id} — verify current pw then update ──────
@@ -148,9 +159,14 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 
 
 # ── POST /auth/history/{user_id} — save a new analysis ───────────────────────
+# Validates user existence and classification before inserting.
 # Returns the new DB row id so the frontend can track it for future updates.
 @router.post("/history/{user_id}")
 def save_analysis(user_id: int, req: AnalysisIn, db: Session = Depends(get_db)):
+    if req.classification not in VALID_CLASSIFICATIONS:
+        raise HTTPException(status_code=400, detail="Invalid classification value")
+    if not db.query(User).filter(User.id == user_id).first():
+        raise HTTPException(status_code=404, detail="User not found")
     analysis = Analysis(
         user_id=user_id,
         label=req.label,
@@ -252,36 +268,31 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
             args=(user.email, user.name, reset_url),
             daemon=True,
         ).start()
-    return {
-        "message": "If that email exists, a reset link has been sent.",
-        "reset_url": reset_url,
-    }
+    # Never return reset_url — it would leak whether the email is registered
+    return {"message": "If that email exists, a reset link has been sent."}
 
 
 # ── POST /auth/reset-password — validate token and update password ────────────
+# Token is required — the email-only path was removed because it allowed
+# unauthenticated password resets by anyone who knows a target email address.
 class ResetPasswordRequest(BaseModel):
-    token:        Optional[str] = None
-    email:        Optional[EmailStr] = None
+    token:        str   # required — issued by /forgot-password
     new_password: str
 
 @router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
-    record = None
-    if req.token:
-        record = db.query(PasswordResetToken).filter(PasswordResetToken.token == req.token).first()
-        if not record or record.expires_at < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Invalid or expired reset link")
-        user = db.query(User).filter(User.id == record.user_id).first()
-    elif req.email:
-        user = db.query(User).filter(User.email == req.email).first()
-    else:
-        raise HTTPException(status_code=400, detail="Reset token or email is required")
-
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    record = db.query(PasswordResetToken).filter(PasswordResetToken.token == req.token).first()
+    if not record or record.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    user = db.query(User).filter(User.id == record.user_id).first()
+    # Always delete the used token, even if the user no longer exists
+    db.delete(record)
     if not user:
+        db.commit()
         raise HTTPException(status_code=404, detail="User not found")
     user.password = hash_password(req.new_password)
-    if record:
-        db.delete(record)
     db.commit()
     return {"message": "Password updated successfully"}
 
@@ -305,7 +316,8 @@ def get_history(user_id: int, db: Session = Depends(get_db)):
             "text": item.text,
             "score": item.score,
             "classification": item.classification,
-            "timestamp": item.created_at.timestamp() * 1000,  # JS milliseconds
+            # Guard against None created_at (row without ORM-side default)
+            "timestamp": (item.created_at.timestamp() * 1000) if item.created_at else 0,
         }
         for item in items
     ]

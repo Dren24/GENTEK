@@ -227,8 +227,10 @@ def analyze(text: str) -> dict:
     llm_items = _llm_analyze(text)
     ai_powered = llm_items is not None
 
-    # Step 3: merge — patterns are ground truth, LLM adds context-aware findings
-    if llm_items:
+    # Step 3: merge — patterns are ground truth, LLM adds context-aware findings.
+    # Use `is not None` so an explicit [] (LLM found nothing) still triggers
+    # the merge path and correctly overrides pattern-only results with ai_powered=True.
+    if llm_items is not None:
         detected = _merge(patterns, llm_items)
     else:
         detected = patterns
