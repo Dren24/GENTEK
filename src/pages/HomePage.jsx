@@ -480,6 +480,7 @@ export default function HomePage() {
     setCanForward(true)
   }
 
+  // ── goForward — step forward in undo/redo stack ──────────────────────────
   const goForward = () => {
     if (stackIdxRef.current >= textStackRef.current.length - 1) return
     stackIdxRef.current++
@@ -531,11 +532,13 @@ export default function HomePage() {
     }
   }
 
+  // ── openFilePicker — triggers hidden file input with the given MIME accept ──
   const openFilePicker = (accept) => {
     setFileAccept(accept)
     setTimeout(() => fileInputRef.current?.click(), 10)
   }
 
+  // ── Drag-and-drop handlers — counter avoids false "leave" on child elements ──
   const onDragEnter = (e) => { e.preventDefault(); dragCounterRef.current++; setIsDragging(true) }
   const onDragLeave = (e) => { e.preventDefault(); dragCounterRef.current--; if (dragCounterRef.current === 0) setIsDragging(false) }
   const onDragOver  = (e) => e.preventDefault()
@@ -632,6 +635,8 @@ export default function HomePage() {
     return html
   }
 
+  // ── normalizeApiResult — coerces API response into a consistent result shape ──
+  // Fills in derived fields (label, color, html) if the backend didn't return them.
   const normalizeApiResult = (data, inputText) => {
     const detected = Array.isArray(data.detected) ? data.detected : []
     const male = Number.isFinite(data.male) ? data.male : detected.filter(d => d.type === 'male').length
