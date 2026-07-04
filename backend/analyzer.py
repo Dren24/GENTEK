@@ -76,24 +76,32 @@ def _llm_analyze(text: str) -> Optional[dict]:
         return None
 
     prompt = (
-        "Analyze the following text for gender bias. "
-        "Return ONLY a valid JSON object with no explanation, markdown, or extra text.\n\n"
-        "Rules:\n"
-        "- Only flag words or phrases that are CLEARLY gendered or biased (e.g. chairman, fireman, housewife, mankind, he/his used generically).\n"
-        "- Do NOT flag already gender-neutral terms like: businessperson, chairperson, salesperson, firefighter, police officer, "
-        "homemaker, workforce, humankind, they/them, or any -person compound words.\n"
-        "- Do NOT flag job titles that are already gender-neutral.\n"
-        "- If the text has no clear gender bias, return classification GENDER-NEUTRAL and empty detected array.\n\n"
+        "You are a gender bias detector. Analyze the text below and return ONLY a JSON object — no explanation, no markdown.\n\n"
+        "What to flag (examples):\n"
+        "- Gendered job titles: chairman→chairperson, fireman→firefighter, stewardess→flight attendant, housewife→homemaker\n"
+        "- Generic masculine pronouns referring to a role: 'he', 'his', 'him' when the referent is a job title or unspecified person → suggest 'they', 'their', 'them'\n"
+        "- Gendered words: mankind→humankind, manpower→workforce\n"
+        "- Stereotypes: 'women are more emotional', 'men are natural leaders'\n\n"
+        "What NOT to flag:\n"
+        "- Already neutral terms: businessperson, chairperson, salesperson, firefighter, police officer, workforce, they/their/them\n"
+        "- Any -person compound words\n"
+        "- 'he' or 'his' referring to a specific named male character\n"
+        "- Neutral job titles\n\n"
+        "Scoring:\n"
+        "- 0 detected items → score MUST be 0, classification MUST be GENDER-NEUTRAL\n"
+        "- 1-2 items → score 10-30\n"
+        "- 3-5 items → score 40-65\n"
+        "- 6+ items → score 66-95\n\n"
         "Required JSON format:\n"
         "{\n"
         '  "classification": "MALE-BIASED" or "FEMALE-BIASED" or "MIXED-BIAS" or "GENDER-NEUTRAL",\n'
-        '  "score": integer 0 to 95  (0 = no bias, 95 = extreme bias),\n'
+        '  "score": integer 0 to 95,\n'
         '  "detected": [\n'
-        '    {"word": "exact phrase copied from the text", "type": "male" or "female" or "stereotype", '
+        '    {"word": "exact phrase from the text", "type": "male" or "female" or "stereotype", '
         '"suggestion": "neutral alternative", "reason": "brief explanation"}\n'
         "  ]\n"
         "}\n\n"
-        f'Text to analyze:\n"{text[:1000]}"'
+        f'Text:\n"{text[:1000]}"'
     )
 
     try:
@@ -123,20 +131,17 @@ def _llm_analyze(text: str) -> Optional[dict]:
         if result.get("classification") not in COLOR_MAP:
             return None
 
-        # Keep only detected items whose phrase actually appears in the text.
-        # This prevents the LLM from inventing findings or flagging neutral rewrites
-        # that are not present in the submitted text.
+        # Keep only detected items whose phrase actually appears in the text
+        # using word-boundary matching to avoid "he" matching inside "the"/"they".
         lower = text.lower()
-        result["detected"] = [
-            d for d in result.get("detected", [])
-            if (
-                d.get("word")
-                and d["word"].lower() in lower
-                and d.get("type") in VALID_TYPES
-                and d.get("suggestion")
-                and d.get("reason")
-            )
-        ]
+        filtered = []
+        for d in result.get("detected", []):
+            w = d.get("word", "")
+            if (w and d.get("type") in VALID_TYPES
+                    and d.get("suggestion") and d.get("reason")
+                    and re.search(r'\b' + re.escape(w.lower()) + r'\b', lower)):
+                filtered.append(d)
+        result["detected"] = filtered
 
         return result
     except Exception:
