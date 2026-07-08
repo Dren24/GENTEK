@@ -174,7 +174,6 @@ const STEPS = [
 const PLAN_FEATURES = [
   { label: 'Analyses / month',    free: '200',   pro: 'Unlimited' },
   { label: 'Suggestion depth',    free: 'Basic', pro: 'Advanced'  },
-  { label: 'Export results',      free: false,   pro: true        },
   { label: 'Analysis history',    free: false,   pro: true        },
   { label: 'API access',          free: false,   pro: true        },
   { label: 'Priority processing', free: false,   pro: true        },
