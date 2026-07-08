@@ -12,7 +12,7 @@ import {
   UploadSimple, FilePdf, FileDoc, FileTxt,
   Command, ArrowElbowDownLeft, Sparkle, ShieldCheck,
   Lightning, Users, ChartBar, Check, X, CaretDown, CaretUp,
-  CaretRight, Copy, DownloadSimple,
+  CaretRight, Copy,
 } from '@phosphor-icons/react'
 import * as pdfjsLib from 'pdfjs-dist'
 import mammoth from 'mammoth'
@@ -255,7 +255,6 @@ function ResultsPanel({ analyzing, results, text, onApply, onApplyAll }) {
               {copied ? 'Copied!' : 'Copy'}
             </button>
             <button onClick={downloadReport} className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
-              <DownloadSimple size={12} />
               Export
             </button>
           </div>
