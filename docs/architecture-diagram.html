@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GENTEK AI System Architecture</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #fff;
+  color: #111;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  padding: 32px 32px 48px;
+  min-width: 1100px;
+}
+
+/* ── TITLE ── */
+.page-title { text-align: center; margin-bottom: 28px; }
+.page-title h1 { font-size: 30px; font-weight: 900; letter-spacing: 1px; color: #111; margin-bottom: 4px; }
+.page-title p  { font-size: 14px; color: #555; font-style: italic; }
+
+/* ── SHARED BOX ── */
+.box { border-radius: 12px; border: 2.5px solid; padding: 14px 14px 16px; position: relative; }
+.box-title    { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; text-align: center; margin-bottom: 6px; }
+.box-subtitle { font-size: 11px; font-weight: 600; text-align: center; color: #555; margin-bottom: 10px; }
+
+.blue   { border-color: #3b82f6; } .blue   .box-title { color: #1d4ed8; }
+.orange { border-color: #f97316; } .orange .box-title { color: #c2410c; }
+.purple { border-color: #8b5cf6; } .purple .box-title { color: #6d28d9; }
+.green  { border-color: #22c55e; } .green  .box-title { color: #15803d; }
+.red    { border-color: #ef4444; } .red    .box-title { color: #b91c1c; }
+.gold   { border-color: #eab308; } .gold   .box-title { color: #92400e; }
+
+/* ── ICON ROW ── */
+.icon-item { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+.icon-item .ico { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.icon-item .txt strong { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: #111; }
+.icon-item .txt span   { font-size: 10.5px; color: #555; }
+
+/* ── ROW 1: Frontend | API | AI Engine ── */
+.row1 {
+  display: grid;
+  grid-template-columns: 220px 1fr 220px;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 14px;
+  position: relative;
+}
+
+/* HTTP/JSON label between Frontend and API */
+.http-lbl {
+  position: absolute;
+  left: 222px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px; font-weight: 700; color: #111;
+  background: #fff; padding: 2px 4px; z-index: 2;
+  text-align: center; line-height: 1.3;
+  pointer-events: none;
+}
+
+/* API Gateway internals */
+.api-inner {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+.api-card {
+  border: 1.5px solid #fed7aa; border-radius: 8px;
+  padding: 8px 6px; text-align: center; background: #fff7ed;
+}
+.api-card .ac-t { font-size: 10px; font-weight: 700; color: #c2410c; }
+.api-card .ac-s { font-size: 9.5px; color: #6b7280; margin-top: 2px; line-height: 1.4; }
+.cors-bar {
+  background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;
+  padding: 6px 10px; text-align: center;
+  font-size: 11px; font-weight: 700; color: #c2410c; margin-top: 4px;
+}
+
+/* AI Engine internals */
+.ai-bias-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.ai-card {
+  border: 1.5px solid #ddd6fe; border-radius: 8px;
+  padding: 8px 6px; text-align: center; background: #faf5ff;
+}
+.ai-card .ai-t { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #6d28d9; }
+.ai-card .ai-s { font-size: 9.5px; color: #6b7280; margin-top: 2px; line-height: 1.4; }
+.ai-detected {
+  background: #faf5ff; border: 1.5px solid #ddd6fe; border-radius: 8px;
+  padding: 8px 10px; text-align: center; margin-top: 6px;
+}
+.ai-detected .adt { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #6d28d9; }
+.ai-detected .ads { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
+
+/* ── ROW 2: Auth | Middleware | Pipeline ── */
+.row2 {
+  display: grid;
+  grid-template-columns: 220px 1fr 220px;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+/* Auth internals */
+.auth-list { list-style: none; margin-top: 6px; }
+.auth-list li {
+  border: 1.5px solid #fde68a; border-radius: 8px;
+  background: #fffbeb; padding: 7px 10px;
+  font-size: 10.5px; color: #374151; margin-bottom: 5px; text-align: center;
+}
+
+/* Middleware internals */
+.mw-inner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
+.mw-card {
+  border: 1.5px solid #fca5a5; border-radius: 8px;
+  padding: 10px 6px; text-align: center; background: #fff5f5;
+}
+.mw-card .ico { font-size: 18px; margin-bottom: 5px; display: block; }
+.mw-card .mc-t { font-size: 9.5px; font-weight: 800; text-transform: uppercase; color: #b91c1c; }
+.mw-card .mc-s { font-size: 9px; color: #6b7280; margin-top: 2px; line-height: 1.4; }
+
+/* Pipeline steps */
+.pipeline-steps { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.ps { display: flex; align-items: flex-start; gap: 8px; }
+.ps-num {
+  width: 20px; height: 20px; flex-shrink: 0;
+  border-radius: 50%; background: #1d4ed8; color: #fff;
+  font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 1px;
+}
+.ps-text { font-size: 10.5px; color: #374151; line-height: 1.4; }
+.ps-text strong { color: #1d4ed8; }
+
+/* ── ROW 3: Data Layer ── */
+.row3 { margin-bottom: 14px; }
+.db-inner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.db-card { border: 1.5px solid #86efac; border-radius: 8px; padding: 10px; background: #f0fdf4; }
+.db-card .dbt { font-size: 10.5px; font-weight: 800; text-transform: uppercase; color: #15803d; margin-bottom: 5px; }
+.db-card ul   { padding-left: 14px; }
+.db-card ul li { font-size: 10.5px; color: #374151; margin-top: 2px; }
+.cascade-note { text-align: center; font-size: 10px; color: #6b7280; margin-top: 6px; font-style: italic; }
+
+/* ── ROW 4: Flow bar + Tech stack ── */
+.row4 { display: grid; grid-template-columns: 1fr 260px; gap: 18px; align-items: start; }
+
+/* Flow bar */
+.flow-bar {
+  display: flex; align-items: stretch;
+  border: 2px solid #e5e7eb; border-radius: 14px;
+  overflow: hidden; background: #f9fafb;
+}
+.fb-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  padding: 14px 8px; position: relative;
+  border-right: 1px solid #e5e7eb;
+}
+.fb-item:last-child { border-right: none; }
+.fb-item .fb-ico   { font-size: 28px; margin-bottom: 6px; }
+.fb-item .fb-title { font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.fb-item .fb-sub   { font-size: 9.5px; color: #6b7280; margin-top: 2px; text-align: center; line-height: 1.4; }
+.fb-item .fb-arr   { position: absolute; right: -10px; top: 50%; transform: translateY(-50%); font-size: 16px; color: #374151; z-index: 1; }
+
+.fb-user    .fb-title { color: #1d4ed8; }
+.fb-front   .fb-title { color: #1d4ed8; }
+.fb-api     .fb-title { color: #c2410c; }
+.fb-ai      .fb-title { color: #6d28d9; }
+.fb-db      .fb-title { color: #15803d; }
+.fb-results .fb-title { color: #b91c1c; }
+
+/* Tech stack */
+.tech-stack { border: 2px solid #374151; border-radius: 12px; padding: 14px; background: #fff; }
+.tech-stack h4 { font-size: 13px; font-weight: 800; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; color: #111; }
+.tech-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tech-col h5 { font-size: 10.5px; font-weight: 700; text-align: center; border-bottom: 1.5px solid #e5e7eb; padding-bottom: 4px; margin-bottom: 6px; color: #374151; }
+.tech-col ul  { list-style: none; }
+.tech-col ul li { font-size: 10.5px; color: #374151; padding: 2px 0; }
+.tech-col ul li::before { content: '• '; color: #6b7280; }
+
+/* ── ARROW CONNECTORS ── */
+.down-arrow { text-align: center; font-size: 20px; color: #374151; line-height: 1; margin: 4px 0; }
+.arrow-grid { display: grid; grid-template-columns: 220px 1fr 220px; gap: 18px; }
+.arrow-grid .down-arrow { }
+</style>
+</head>
+<body>
+
+<!-- ── TITLE ── -->
+<div class="page-title">
+  <h1>GENTEK AI SYSTEM ARCHITECTURE</h1>
+  <p>Gender Bias Detection AI System</p>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     ROW 1 — Frontend | API Gateway | AI Engine
+════════════════════════════════════════════════ -->
+<div class="row1">
+
+  <!-- FRONTEND LAYER -->
+  <div class="box blue">
+    <div class="box-title">Frontend Layer</div>
+    <div class="box-subtitle">React + Vite</div>
+
+    <div class="icon-item">
+      <span class="ico">🖥️</span>
+      <div class="txt">
+        <strong>UI Components</strong>
+        <span>Hero, Analyzer, Features, Pricing, FAQ</span>
+      </div>
+    </div>
+    <div class="icon-item">
+      <span class="ico">📄</span>
+      <div class="txt">
+        <strong>Pages</strong>
+        <span>Dashboard, Detector, Workspace, Settings, About, Contact</span>
+      </div>
+    </div>
+    <div class="icon-item">
+      <span class="ico">🔐</span>
+      <div class="txt">
+        <strong>Auth Context</strong>
+        <span>Login, Register, Reset Password, History</span>
+      </div>
+    </div>
+    <div class="icon-item">
+      <span class="ico">🧩</span>
+      <div class="txt">
+        <strong>Custom Hooks</strong>
+        <span>useDarkMode, useScrollReveal</span>
+      </div>
+    </div>
+    <div class="icon-item">
+      <span class="ico">🔗</span>
+      <div class="txt">
+        <strong>React Router</strong>
+        <span>Navigation &amp; Routing</span>
+      </div>
+    </div>
+    <div class="icon-item">
+      <span class="ico">📁</span>
+      <div class="txt">
+        <strong>File Upload</strong>
+        <span>PDF (pdfjs), DOCX (mammoth), TXT — drag-and-drop</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- HTTP/JSON label -->
+  <div class="http-lbl">HTTP<br>JSON</div>
+
+  <!-- API GATEWAY -->
+  <div class="box orange">
+    <div class="box-title">⚡ API Gateway (FastAPI)</div>
+    <div class="api-inner">
+      <div class="api-card">
+        <div class="ac-t">GET /health</div>
+        <div class="ac-s">Uptime Check</div>
+      </div>
+      <div class="api-card">
+        <div class="ac-t">POST /analyze</div>
+        <div class="ac-s">Text Analysis Endpoint</div>
+      </div>
+      <div class="api-card">
+        <div class="ac-t">Auth Router</div>
+        <div class="ac-s">register, login, history, reset</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;">
+      <div class="api-card">
+        <div class="ac-t">PUT /update</div>
+        <div class="ac-s">Name &amp; Password Change</div>
+      </div>
+      <div class="api-card">
+        <div class="ac-t">PUT /notifications</div>
+        <div class="ac-s">Email Pref Toggle</div>
+      </div>
+      <div class="api-card">
+        <div class="ac-t">DELETE /delete</div>
+        <div class="ac-s">Account Removal</div>
+      </div>
+    </div>
+    <div class="cors-bar">CORS MIDDLEWARE — Dev Server Access (localhost:5173)</div>
+  </div>
+
+  <!-- AI ENGINE -->
+  <div class="box purple">
+    <div class="box-title">AI Engine (NLP Core)</div>
+
+    <div style="text-align:center;margin-bottom:8px;">
+      <div style="font-size:11px;font-weight:700;color:#6d28d9;">🔍 BIAS ANALYSIS</div>
+      <div style="font-size:10px;color:#6b7280;">Keyword Pattern Matching</div>
+    </div>
+
+    <div class="ai-bias-row">
+      <div class="ai-card">
+        <div class="ai-t">19 Bias Patterns</div>
+        <div class="ai-s">Male / Female Stereotypes</div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-t">🧠 Classification</div>
+        <div class="ai-s">MALE / FEMALE / NEUTRAL / MIXED</div>
+      </div>
+      <div class="ai-card">
+        <div class="ai-t">📊 Scoring</div>
+        <div class="ai-s">0–100 Bias Score</div>
+      </div>
+    </div>
+
+    <div class="ai-detected">
+      <div class="adt">💡 Detected Biases</div>
+      <div class="ads">Highlight &amp; Suggestions Output</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Down arrows -->
+<div class="arrow-grid" style="margin-bottom:4px;">
+  <div class="down-arrow">↓</div>
+  <div class="down-arrow">↓</div>
+  <div class="down-arrow">↓</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     ROW 2 — Authentication | Middleware | Pipeline
+════════════════════════════════════════════════ -->
+<div class="row2">
+
+  <!-- AUTHENTICATION -->
+  <div class="box gold">
+    <div class="box-title">🔒 Authentication</div>
+    <ul class="auth-list">
+      <li>User Registration</li>
+      <li>User Login</li>
+      <li>Password Reset (email token)</li>
+      <li>localStorage Session (client-side)</li>
+      <li>Password Hashing (bcrypt)</li>
+      <li>Email Notifications Toggle</li>
+      <li>Change Password (verified)</li>
+    </ul>
+  </div>
+
+  <!-- MIDDLEWARE & SECURITY -->
+  <div class="box red">
+    <div class="box-title">Middleware &amp; Security</div>
+    <div class="mw-inner">
+      <div class="mw-card">
+        <span class="ico">🛡️</span>
+        <div class="mc-t">Auth Middleware</div>
+        <div class="mc-s">bcrypt hashing &amp; Session Management via localStorage</div>
+      </div>
+      <div class="mw-card">
+        <span class="ico">✅</span>
+        <div class="mc-t">Input Validation</div>
+        <div class="mc-s">Pydantic Models — EmailStr, length checks, type guards</div>
+      </div>
+      <div class="mw-card">
+        <span class="ico">🌐</span>
+        <div class="mc-t">CORS Handler</div>
+        <div class="mc-s">Cross-Origin Resource Sharing Protection</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI PIPELINE FLOW -->
+  <div class="box blue">
+    <div class="box-title">AI Pipeline Flow</div>
+    <div class="pipeline-steps">
+      <div class="ps"><div class="ps-num">1</div><div class="ps-text"><strong>INPUT:</strong> User submits text via POST /analyze</div></div>
+      <div class="ps"><div class="ps-num">2</div><div class="ps-text"><strong>PATTERN DETECTION:</strong> Scan for 19 bias patterns (Male, Female, Stereotypes)</div></div>
+      <div class="ps"><div class="ps-num">3</div><div class="ps-text"><strong>COUNTING &amp; CATEGORIZATION:</strong> Tally occurrences by bias type</div></div>
+      <div class="ps"><div class="ps-num">4</div><div class="ps-text"><strong>CLASSIFICATION:</strong> Assign bias category based on counts</div></div>
+      <div class="ps"><div class="ps-num">5</div><div class="ps-text"><strong>SCORING:</strong> Calculate 0–100 bias intensity score</div></div>
+      <div class="ps"><div class="ps-num">6</div><div class="ps-text"><strong>OUTPUT:</strong> Return results (patterns, classification, score, suggestions)</div></div>
+      <div class="ps"><div class="ps-num">7</div><div class="ps-text"><strong>PERSISTENCE:</strong> Save to analysis table with user ID, text, score, classification, timestamp</div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Down arrow -->
+<div class="down-arrow" style="margin-bottom:4px;">↓</div>
+
+<!-- ══════════════════════════════════════════════
+     ROW 3 — Data Layer
+════════════════════════════════════════════════ -->
+<div class="row3">
+  <div class="box green">
+    <div class="box-title">🗄️ Data Layer (SQLite + SQLAlchemy)</div>
+    <div class="db-inner">
+      <div class="db-card">
+        <div class="dbt">USERS Table</div>
+        <ul>
+          <li>id (PK)</li>
+          <li>name, email</li>
+          <li>password (bcrypt hash)</li>
+          <li>email_notifications</li>
+          <li>created_at</li>
+        </ul>
+      </div>
+      <div class="db-card">
+        <div class="dbt">ANALYSES Table</div>
+        <ul>
+          <li>id (PK)</li>
+          <li>user_id (FK → users)</li>
+          <li>label, text</li>
+          <li>score, classification</li>
+          <li>created_at</li>
+        </ul>
+      </div>
+      <div class="db-card">
+        <div class="dbt">RESET TOKENS Table</div>
+        <ul>
+          <li>id (PK)</li>
+          <li>user_id (FK → users)</li>
+          <li>token (urlsafe 32-byte)</li>
+          <li>expires_at (1-hour TTL)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cascade-note">Cascade Delete (user → analyses) &nbsp;·&nbsp; One-to-Many (user → analyses) &nbsp;·&nbsp; Auto-migrate on startup</div>
+  </div>
+</div>
+
+<!-- Down arrow -->
+<div class="down-arrow" style="margin-bottom:10px;">↓</div>
+
+<!-- ══════════════════════════════════════════════
+     ROW 4 — Flow bar + Tech stack
+════════════════════════════════════════════════ -->
+<div class="row4">
+
+  <!-- FLOW BAR -->
+  <div class="flow-bar">
+    <div class="fb-item fb-user">
+      <div class="fb-ico">👤</div>
+      <div class="fb-title">USER</div>
+      <div class="fb-sub">Submit Text or Upload File</div>
+      <div class="fb-arr">→</div>
+    </div>
+    <div class="fb-item fb-front">
+      <div class="fb-ico">🖥️</div>
+      <div class="fb-title">Frontend</div>
+      <div class="fb-sub">React Application</div>
+      <div class="fb-arr">→</div>
+    </div>
+    <div class="fb-item fb-api">
+      <div class="fb-ico">⚡</div>
+      <div class="fb-title">API Gateway</div>
+      <div class="fb-sub">FastAPI Endpoints</div>
+      <div class="fb-arr">→</div>
+    </div>
+    <div class="fb-item fb-ai">
+      <div class="fb-ico">🧠</div>
+      <div class="fb-title">AI Engine</div>
+      <div class="fb-sub">NLP Analysis</div>
+      <div class="fb-arr">→</div>
+    </div>
+    <div class="fb-item fb-db">
+      <div class="fb-ico">🗄️</div>
+      <div class="fb-title">Database</div>
+      <div class="fb-sub">SQLite Storage</div>
+      <div class="fb-arr">→</div>
+    </div>
+    <div class="fb-item fb-results">
+      <div class="fb-ico">📊</div>
+      <div class="fb-title">Results</div>
+      <div class="fb-sub">Bias Score &amp; Insights</div>
+    </div>
+  </div>
+
+  <!-- TECH STACK -->
+  <div class="tech-stack">
+    <h4>Technology Stack</h4>
+    <div class="tech-cols">
+      <div class="tech-col">
+        <h5>Frontend</h5>
+        <ul>
+          <li>React 18</li>
+          <li>Vite</li>
+          <li>Tailwind CSS</li>
+          <li>React Router v6</li>
+          <li>Phosphor Icons</li>
+          <li>pdfjs-dist</li>
+          <li>mammoth</li>
+        </ul>
+      </div>
+      <div class="tech-col">
+        <h5>Backend</h5>
+        <ul>
+          <li>FastAPI</li>
+          <li>SQLAlchemy</li>
+          <li>SQLite</li>
+          <li>Pydantic</li>
+          <li>bcrypt</li>
+          <li>Gmail SMTP</li>
+          <li>python-dotenv</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

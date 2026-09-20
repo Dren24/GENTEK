@@ -1,7 +1,7 @@
 // ── Root app component ────────────────────────────────────────────────────────
 // Handles global layout: sidebar offset, shared Navbar/Footer, route definitions,
 // and the global PricingModal overlay. Pages with their own full-screen layout
-// (like /dashboard) bypass the shared shell entirely.
+// (like /detector) bypass the shared shell entirely.
 
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
@@ -60,7 +60,7 @@ function useScrollReveal(user) {
 }
 
 // ── Pages that use their own full-screen layout (no shared navbar/footer/sidebar)
-const HIDE_SHELL = ['/detector', '/dashboard', '/reset-password']
+const HIDE_SHELL = ['/detector', '/reset-password']
 
 export default function App() {
   const { pathname }              = useLocation()

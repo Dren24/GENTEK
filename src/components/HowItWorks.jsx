@@ -15,9 +15,9 @@ const steps = [
   {
     number: '02',
     icon: null,
-    title: 'AI Analyzes for Bias',
+    title: 'GENTEK Checks for Bias',
     description:
-      'Our NLP engine scans for gender-biased words, phrases, and expressions, detecting patterns learned from curated datasets.',
+      'GENTEK scans for gender-biased words, phrases, and expressions that may make the text less inclusive.',
     color: 'text-cyan-400',
     bg: 'bg-cyan-500/10',
     border: 'border-cyan-500/20',

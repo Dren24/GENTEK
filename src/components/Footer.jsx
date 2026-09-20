@@ -58,13 +58,13 @@ export default function Footer() {
             </a>
 
             <p className="text-slate-500 text-sm leading-relaxed max-w-xs mb-5">
-              An AI-powered gender bias detection platform using Natural Language Processing — built for writers, teams, and organizations.
+              A practical writing checker for spotting gender-biased language and choosing more inclusive alternatives.
             </p>
 
             <div className="flex items-center gap-2 p-3 rounded-xl border border-white/[0.06] bg-navy-800/40 inline-flex w-fit">
               <BrainIcon size={14} color="#a78bfa" faceColor="#1e1b4b" />
               <span className="text-xs text-slate-400">
-                Powered by NLP and Machine Learning
+                Built for fair, inclusive writing
               </span>
             </div>
           </div>

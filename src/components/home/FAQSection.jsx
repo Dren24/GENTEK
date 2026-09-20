@@ -4,7 +4,7 @@ import { Plus, Minus } from '@phosphor-icons/react'
 const faqs = [
   {
     q: 'What is GENTEK?',
-    a: 'GENTEK is an AI-powered web tool that analyzes written text for gender-biased language using Natural Language Processing (NLP). It classifies text as Male-Biased, Female-Biased, or Gender-Neutral, highlights specific biased words, and suggests inclusive alternatives.',
+    a: 'GENTEK is a web tool that helps you find gender-biased language in English text. It highlights possible issues, explains them, and suggests more inclusive alternatives.',
   },
   {
     q: 'Is GENTEK free to use?',
@@ -12,23 +12,23 @@ const faqs = [
   },
   {
     q: 'What types of text can I analyze?',
-    a: 'You can analyze any English-language written text, including essays, academic papers, job advertisements, news articles, blog posts, reports, and social media content. The system is currently optimized for English text only.',
+    a: 'You can analyze English essays, academic papers, job advertisements, news articles, blog posts, reports, and social media content.',
   },
   {
     q: 'How accurate is the bias detection?',
-    a: 'GENTEK is trained on curated gender bias datasets and uses machine learning to identify patterns associated with gendered language. While the system is highly effective for common bias patterns, it may occasionally misclassify complex expressions like sarcasm, slang, or figurative language.',
+    a: 'GENTEK works best for common gendered terms, occupational titles, and stereotype phrases. Like any writing checker, it may miss subtle context or flag wording that still needs human judgment.',
   },
   {
     q: 'Does GENTEK detect other types of bias?',
-    a: "No. GENTEK is specifically designed to detect gender-related bias. It does not currently identify racial, cultural, religious, political, or other forms of bias. The system's scope is focused to ensure high accuracy within the gender bias domain.",
+    a: 'No. GENTEK focuses on gender-related bias. It does not currently check for racial, cultural, religious, political, or other forms of bias.',
   },
   {
     q: 'Is my text stored or shared?',
-    a: 'No. In the current version, all analysis runs entirely in your browser — no text is sent to any external server. Your data stays private and is never stored or shared.',
+    a: 'Guest analysis is temporary. If you sign in, you can save recent analyses to your account history for later review.',
   },
   {
     q: 'Who built GENTEK?',
-    a: 'GENTEK was built by a dedicated team of AI and NLP engineers passionate about fair, inclusive communication. The product is continuously improved based on user feedback and evolving language research.',
+    a: 'GENTEK was created as a practical tool for students, writers, and teams who want clearer and more inclusive communication.',
   },
 ]
 

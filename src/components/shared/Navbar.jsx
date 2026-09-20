@@ -166,14 +166,16 @@ export default function Navbar() {
             {/* ── Logged-in desktop: Gift offer icon + Temp chat button ─────── */}
             {user && (
               <div className="hidden md:flex items-center gap-2">
-                {/* Gift icon — opens the PricingModal upgrade popup */}
-                <button
-                  onClick={openPricing}
-                  title="Free offer"
-                  className="w-8 h-8 flex items-center justify-center rounded-lg text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                >
-                  <Gift size={16} weight="fill" />
-                </button>
+                {/* Gift icon — Free users only; opens the PricingModal upgrade popup */}
+                {!user.is_premium && (
+                  <button
+                    onClick={openPricing}
+                    title="Free offer"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                  >
+                    <Gift size={16} weight="fill" />
+                  </button>
+                )}
 
                 {/* Temp chat button — dashed circle signals ephemeral session */}
                 <button
@@ -208,14 +210,16 @@ export default function Navbar() {
             <div className="md:hidden flex items-center gap-1">
               {user ? (
                 <>
-                  {/* Mobile: Gift offer icon */}
-                  <button
-                    onClick={openPricing}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg text-blue-500"
-                    title="Free offer"
-                  >
-                    <Gift size={15} weight="fill" />
-                  </button>
+                  {/* Mobile: Gift offer icon — Free users only */}
+                  {!user.is_premium && (
+                    <button
+                      onClick={openPricing}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-blue-500"
+                      title="Free offer"
+                    >
+                      <Gift size={15} weight="fill" />
+                    </button>
+                  )}
 
                   {/* Mobile: Temp chat dashed circle button */}
                   <button

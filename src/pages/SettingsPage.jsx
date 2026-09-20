@@ -14,6 +14,7 @@ import { useDarkMode } from '../hooks/useDarkMode'
 
 // ── ChangePasswordModal — three fields: current, new, confirm password ────────
 function ChangePasswordModal({ userId, onClose }) {
+  const { authHeader } = useAuth()
   const [form, setForm]     = useState({ current: '', newPass: '', confirm: '' })
   const [showPass, setShow] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -31,7 +32,7 @@ function ChangePasswordModal({ userId, onClose }) {
     try {
       const res = await fetch(`/auth/change-password/${userId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
         body: JSON.stringify({ current_password: form.current, new_password: form.newPass }),
       })
       if (!res.ok) {

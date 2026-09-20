@@ -4,7 +4,7 @@ const features = [
   {
     icon: MagnifyingGlass,
     title: 'Real-time Bias Detection',
-    desc: 'Instantly identify gender-biased words, phrases, and structural patterns in any text using a trained NLP model.',
+    desc: 'Instantly identify gender-biased words, phrases, and role assumptions in English text.',
     color: 'text-brand-600',
     bg: 'bg-brand-50',
   },
@@ -25,7 +25,7 @@ const features = [
   {
     icon: Lightbulb,
     title: 'Smart Suggestions',
-    desc: 'Receive AI-generated inclusive alternatives for every flagged word or phrase, ranked by relevance.',
+    desc: 'Receive inclusive alternatives for every flagged word or phrase, with simple guidance for rewriting.',
     color: 'text-amber-600',
     bg: 'bg-amber-50',
   },
@@ -56,7 +56,7 @@ export default function FeaturesSection() {
             <span className="text-gradient">Without Bias</span>
           </h2>
           <p className="text-gray-500 text-lg max-w-xl mx-auto leading-relaxed">
-            GENTEK combines multiple layers of NLP analysis to give you the most thorough gender bias assessment available.
+            GENTEK turns bias checking into a clear review flow: paste text, scan results, and revise with confidence.
           </p>
         </div>
 

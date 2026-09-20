@@ -8,7 +8,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Plus, ClockCounterClockwise, Lightning, FileText,
   Gear, Question, SignOut, SidebarSimple, Sun, Moon,
-  PushPin, MagnifyingGlass, X, PencilSimple, Trash,
+  PushPin, MagnifyingGlass, X, PencilSimple, Trash, ChartBar,
 } from '@phosphor-icons/react'
 import GentekMark, { GentekWordmark } from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
@@ -174,12 +174,21 @@ function UserPopup({ user, logout, onClose, onNavigate, onHelp }) {
             <span className="text-xs font-bold text-white">{user?.name?.charAt(0).toUpperCase()}</span>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{user?.name}</p>
+            <p className="text-sm font-semibold text-white truncate flex items-center gap-1.5">
+              <span className="truncate">{user?.name}</span>
+              {user?.is_premium && (
+                <span className="flex-shrink-0 text-[9px] font-bold text-brand-300 bg-brand-900/50 border border-brand-700 px-1.5 py-0.5 rounded-full">PRO</span>
+              )}
+            </p>
             <p className="text-[11px] text-gray-400 truncate">{user?.email}</p>
           </div>
         </div>
       </div>
       <div className="p-1.5">
+        {/* Dashboard — navigate to /dashboard */}
+        <button onClick={() => { onNavigate('/dashboard'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
+          <ChartBar size={14} />Dashboard
+        </button>
         {/* Settings — navigate to /settings */}
         <button onClick={() => { onNavigate('/settings'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
           <Gear size={14} />Settings
@@ -345,18 +354,28 @@ export default function AppSidebar() {
               ))}
             </div>
 
-            {/* Upgrade box — "Go Pro" nudge with lightning icon */}
-            <div className="mx-3 p-3 rounded-xl bg-white dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 shadow-sm dark:shadow-none mb-3">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
-                <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Pro</span>
+            {/* Plan status box — "Go Pro" nudge for Free users, Premium status once upgraded */}
+            {user?.is_premium ? (
+              <div className="mx-3 p-3 rounded-xl bg-white dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 shadow-sm dark:shadow-none mb-3">
+                <div className="flex items-center gap-1.5">
+                  <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
+                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Premium Account</span>
+                </div>
+                <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mt-1">Unlimited analyses, exports, API access and history — all unlocked.</p>
               </div>
-              <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mb-2">Unlimited analyses, exports, API access and history.</p>
-              {/* Upgrade button — opens PricingModal */}
-              <button onClick={openPricing} className="block w-full text-center text-[11px] font-bold bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-1.5 transition-colors">
-                Upgrade →
-              </button>
-            </div>
+            ) : (
+              <div className="mx-3 p-3 rounded-xl bg-white dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 shadow-sm dark:shadow-none mb-3">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
+                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Pro</span>
+                </div>
+                <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mb-2">Unlimited analyses, exports, API access and history.</p>
+                {/* Upgrade button — opens PricingModal */}
+                <button onClick={openPricing} className="block w-full text-center text-[11px] font-bold bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-1.5 transition-colors">
+                  Upgrade →
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -411,14 +430,20 @@ export default function AppSidebar() {
               )}
             </div>
 
-            {/* Lightning icon — opens PricingModal upgrade popup */}
-            <button
-              title="Upgrade"
-              onClick={openPricing}
-              className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors"
-            >
-              <Lightning size={18} />
-            </button>
+            {/* Lightning icon — Free: opens PricingModal upgrade popup. Premium: static status badge */}
+            {user?.is_premium ? (
+              <div title="Premium account" className="w-full flex justify-center p-2.5 rounded-xl text-brand-600 dark:text-brand-400">
+                <Lightning size={18} weight="fill" />
+              </div>
+            ) : (
+              <button
+                title="Upgrade"
+                onClick={openPricing}
+                className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+              >
+                <Lightning size={18} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -438,6 +463,10 @@ export default function AppSidebar() {
         {/* Settings, Help, Sign out — inline labels when expanded, icons when collapsed */}
         {sidebarOpen ? (
           <>
+            {/* Dashboard — navigate to /dashboard page */}
+            <button onClick={() => go('/dashboard')} className="w-full flex items-center gap-2.5 px-3 py-2 text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 rounded-xl transition-colors text-xs font-medium">
+              <ChartBar size={16} className="flex-shrink-0" />Dashboard
+            </button>
             {/* Settings — navigate to /settings page */}
             <button onClick={() => go('/settings')} className="w-full flex items-center gap-2.5 px-3 py-2 text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 rounded-xl transition-colors text-xs font-medium">
               <Gear size={16} className="flex-shrink-0" />Settings
@@ -454,6 +483,10 @@ export default function AppSidebar() {
           </>
         ) : (
           <>
+            {/* Chart icon — dashboard */}
+            <button title="Dashboard" onClick={() => go('/dashboard')} className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors">
+              <ChartBar size={16} />
+            </button>
             {/* Gear icon — settings */}
             <button title="Settings" onClick={() => go('/settings')} className="w-full flex justify-center p-2.5 rounded-xl text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white dark:hover:bg-gray-800 transition-colors">
               <Gear size={16} />

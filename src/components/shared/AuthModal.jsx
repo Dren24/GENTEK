@@ -3,11 +3,16 @@
 // Four internal views: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
 // Pressing Escape or clicking outside closes the modal.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, PaperPlaneTilt } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
+
+// ── Google OAuth 2.0 Web Client ID — public identifier, safe to ship to the
+// browser. Set VITE_GOOGLE_CLIENT_ID in the project root .env; must match
+// GOOGLE_CLIENT_ID in backend/.env. ───────────────────────────────────────────
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 // ── GoogleIcon — SVG inline so no extra dependency ────────────────────────────
 function GoogleIcon() {
@@ -23,7 +28,7 @@ function GoogleIcon() {
 
 // view: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
 export default function AuthModal({ mode = 'signup', onClose }) {
-  const { login, register }     = useAuth()
+  const { login, register, loginWithGoogle } = useAuth()
   const navigate                = useNavigate()
   const [view, setView]         = useState(mode)
   const [showPass, setShowPass] = useState(false)
@@ -31,6 +36,13 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [error, setError]       = useState('')
   const [form, setForm]         = useState({ name: '', email: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
+  const [remember, setRemember] = useState(true)
+  const googleClientRef = useRef(null)
+  const rememberRef     = useRef(true)
+
+  // ── Keep a ref mirror of `remember` so the Google callback (created once,
+  // below) always reads the latest value without needing to be re-created ──
+  useEffect(() => { rememberRef.current = remember }, [remember])
 
   // ── Escape key closes modal ───────────────────────────────────────────────
   useEffect(() => {
@@ -45,6 +57,59 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     return () => { document.body.style.overflow = '' }
   }, [])
 
+  // ── Set up the Google OAuth token client once Google's script is ready.
+  // Polls briefly since the GIS script loads async/defer — gives up quietly
+  // after a few seconds rather than retrying forever. ───────────────────────
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return
+    let cancelled = false
+    let attempts = 0
+    const trySetup = () => {
+      if (cancelled) return
+      if (window.google?.accounts?.oauth2) {
+        googleClientRef.current = window.google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: 'openid email profile',
+          callback: async (tokenResponse) => {
+            if (!tokenResponse?.access_token) {
+              setError('Google sign-in was cancelled or failed.')
+              return
+            }
+            setLoading(true)
+            setError('')
+            try {
+              await loginWithGoogle(tokenResponse.access_token, rememberRef.current)
+              onClose()
+            } catch (err) {
+              setError(err.message || 'Google sign-in failed.')
+            } finally {
+              setLoading(false)
+            }
+          },
+        })
+        return
+      }
+      if (++attempts <= 15) setTimeout(trySetup, 300)
+    }
+    trySetup()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── handleGoogleClick — triggers the Google popup from our own styled button ──
+  const handleGoogleClick = () => {
+    setError('')
+    if (!GOOGLE_CLIENT_ID) {
+      setError('Google sign-in is not configured yet.')
+      return
+    }
+    if (!googleClientRef.current) {
+      setError('Google sign-in is still loading — please try again in a moment.')
+      return
+    }
+    googleClientRef.current.requestAccessToken()
+  }
+
   // ── Controlled input helper — clears error on every keystroke ────────────
   const set = (field) => (e) => { const val = e.target.value; setForm(prev => ({ ...prev, [field]: val })); setError('') }
 
@@ -57,7 +122,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
       if (view === 'signup') {
         await register(form.name, form.email, form.password)
       } else {
-        await login(form.email, form.password)
+        await login(form.email, form.password, remember)
       }
       onClose()   // close modal immediately on success
     } catch (err) {
@@ -102,6 +167,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     setLoading(false)
     setError('')
     setForm({ name: '', email: '', password: '' })
+    setRemember(true)
   }
 
   // ── Shared input class — used for all text/email/password fields ──────────
@@ -274,8 +340,13 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             </div>
 
             <div className="px-8 pb-8 space-y-4">
-              {/* ── Google OAuth button (UI only — not wired to real OAuth yet) ── */}
-              <button className="w-full flex items-center justify-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+              {/* ── Google OAuth — verified server-side via /auth/google ── */}
+              <button
+                type="button"
+                onClick={handleGoogleClick}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
                 <GoogleIcon />
                 Continue with Google
               </button>
@@ -338,9 +409,18 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   </button>
                 </div>
 
-                {/* Forgot password link — login view only */}
+                {/* Remember me + Forgot password — login view only */}
                 {view === 'login' && (
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={remember}
+                        onChange={(e) => setRemember(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-400 focus:ring-offset-0"
+                      />
+                      Remember me
+                    </label>
                     <button
                       type="button"
                       onClick={() => { setResetEmail(form.email); setView('forgot') }}

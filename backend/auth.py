@@ -1,14 +1,18 @@
 # ── Auth & history routes ────────────────────────────────────────────────────
 # All routes are prefixed with /auth (e.g. POST /auth/register).
 # Passwords are hashed with bcrypt — never stored or returned in plain text.
+# Protected routes require a valid JWT Bearer token (issued at login/register).
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
+from jose import JWTError, jwt
 import bcrypt
 import secrets
 import smtplib
 import os
+import requests
 import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -23,8 +27,76 @@ from models import User, Analysis, PasswordResetToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# ── JWT configuration ─────────────────────────────────────────────────────────
+# No hardcoded fallback secret — a known string baked into source would let
+# anyone forge tokens for any user. If JWT_SECRET isn't set, generate a random
+# one for this process (existing sessions won't survive a restart, but that's
+# far safer than a guessable default). Set JWT_SECRET in production.
+_JWT_SECRET = os.getenv("JWT_SECRET")
+if not _JWT_SECRET:
+    _JWT_SECRET = secrets.token_hex(32)
+    print("[auth] WARNING: JWT_SECRET not set — using a random secret for this process only. Set JWT_SECRET in your environment for stable sessions across restarts.")
+_JWT_ALGORITHM = "HS256"
+_JWT_EXPIRE_DAYS = 30           # "Remember me" checked — survives browser restarts
+_JWT_EXPIRE_HOURS_SHORT = 12    # "Remember me" unchecked — short-lived, paired with sessionStorage on the frontend
+
+_bearer = HTTPBearer()
+_bearer_optional = HTTPBearer(auto_error=False)
+
+
+def _create_token(user_id: int, name: str, email: str, remember: bool = True) -> str:
+    """Sign a JWT containing user identity. Expiry depends on "Remember me":
+    30 days when remembered, a short 12-hour session otherwise (the frontend
+    pairs this with sessionStorage vs localStorage for the matching lifetime)."""
+    exp_delta = timedelta(days=_JWT_EXPIRE_DAYS) if remember else timedelta(hours=_JWT_EXPIRE_HOURS_SHORT)
+    payload = {
+        "sub":   str(user_id),
+        "name":  name,
+        "email": email,
+        "exp":   datetime.utcnow() + exp_delta,
+    }
+    return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Security(_bearer)) -> dict:
+    """JWT auth middleware — validates Bearer token and returns the decoded user."""
+    try:
+        payload = jwt.decode(credentials.credentials, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return {"id": int(user_id), "name": payload.get("name"), "email": payload.get("email")}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Security(_bearer_optional)) -> Optional[dict]:
+    """Like get_current_user, but returns None instead of raising when no/invalid
+    token is present — lets a route serve both guests and logged-in users while
+    still being able to identify who's calling (used by /analyze for the
+    server-side Free-plan word limit, so it can't be bypassed from the client)."""
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        return {"id": int(user_id), "name": payload.get("name"), "email": payload.get("email")}
+    except JWTError:
+        return None
+
 # ── Valid classification values — rejects unknown strings before DB insert ─────
-VALID_CLASSIFICATIONS = {"MALE-BIASED", "FEMALE-BIASED", "GENDER-NEUTRAL", "MIXED-BIAS"}
+VALID_CLASSIFICATIONS = {"MALE-BIASED", "FEMALE-BIASED", "GENDER-NEUTRAL"}
+
+# ── Google Sign-In config ──────────────────────────────────────────────────────
+# GOOGLE_CLIENT_ID must match the OAuth 2.0 Web Client ID configured in Google
+# Cloud Console (the same value the frontend uses as VITE_GOOGLE_CLIENT_ID).
+# Never store a Google client *secret* here — the token-client flow used by the
+# frontend doesn't need one, only the client ID (which is not a secret).
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+GOOGLE_USERINFO_URL  = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 # ── Request schemas (Pydantic) ────────────────────────────────────────────────
@@ -36,8 +108,21 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # Plain str, not EmailStr — login only needs to match an existing row, and
+    # EmailStr's RFC validation rejects reserved TLDs like .local (used by the
+    # seeded DEV/TEST account in main.py). A malformed value just won't match
+    # any user and falls through to the normal "Invalid email or password".
+    email: str
     password: str
+    remember: bool = True   # False = short-lived token, paired with sessionStorage on the frontend
+
+
+# ── Google Sign-In payload — the frontend sends only the opaque OAuth access
+# token it got from Google; identity is always verified server-side from it,
+# never trusted from client-supplied fields. ───────────────────────────────────
+class GoogleAuthRequest(BaseModel):
+    access_token: str
+    remember: bool = True
 
 
 # ── Analysis create payload ───────────────────────────────────────────────────
@@ -45,7 +130,7 @@ class AnalysisIn(BaseModel):
     label: str           # truncated preview shown in sidebar (≤ 48 chars)
     text: str
     score: float
-    classification: str  # MALE-BIASED | FEMALE-BIASED | GENDER-NEUTRAL | MIXED-BIAS
+    classification: str  # MALE-BIASED | FEMALE-BIASED | GENDER-NEUTRAL
 
 
 # ── Analysis update payload (re-analyze same entry) ──────────────────────────
@@ -83,7 +168,8 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications)}
+    token = _create_token(user.id, user.name, user.email)
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium), "token": token}
 
 
 # ── POST /auth/login — verify credentials and return user ────────────────────
@@ -93,7 +179,79 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == req.email).first()
     if not user or not verify_password(req.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications)}
+    token = _create_token(user.id, user.name, user.email, remember=req.remember)
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium), "token": token}
+
+
+# ── POST /auth/google — verify a Google OAuth access token and log in/register ──
+# Flow: frontend gets an access token from Google Identity Services -> sends it
+# here -> we ask Google directly who it belongs to (never trust client-supplied
+# identity claims) -> find-or-create the matching GENTEK account -> issue our
+# own normal JWT, exactly like email/password login.
+@router.post("/google")
+def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+
+    # Step 1: confirm the token was actually issued for this app before doing
+    # anything else with it.
+    try:
+        info_resp = requests.get(
+            GOOGLE_TOKENINFO_URL,
+            params={"access_token": req.access_token},
+            timeout=10,
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach Google to verify credential")
+    if info_resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired Google credential")
+    tokeninfo = info_resp.json()
+    if tokeninfo.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="Google credential was not issued for this app")
+
+    # Step 2: fetch the verified profile for that token (email, name, stable id)
+    try:
+        userinfo_resp = requests.get(
+            GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {req.access_token}"},
+            timeout=10,
+        )
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="Could not reach Google to verify credential")
+    if userinfo_resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired Google credential")
+    userinfo = userinfo_resp.json()
+
+    google_id = userinfo.get("sub")
+    email     = userinfo.get("email")
+    if not google_id or not email:
+        raise HTTPException(status_code=401, detail="Google account is missing required information")
+    if not userinfo.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Google email is not verified")
+    name = userinfo.get("name") or email.split("@")[0]
+
+    # Step 3: find-or-create — link to an existing account by google_id first,
+    # then by email (so a prior email/password signup isn't duplicated), else
+    # create a fresh GENTEK account. Google users get an unusable random
+    # password hash — they never set one and can't log in with it.
+    user = db.query(User).filter(User.google_id == google_id).first()
+    if not user:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.google_id = google_id
+        else:
+            user = User(
+                name=name,
+                email=email,
+                password=hash_password(secrets.token_urlsafe(32)),
+                google_id=google_id,
+            )
+            db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    token = _create_token(user.id, user.name, user.email, remember=req.remember)
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium), "token": token}
 
 
 # ── Update name schema — narrower than RegisterRequest (no password field) ────
@@ -103,14 +261,16 @@ class UpdateNameRequest(BaseModel):
 # ── PUT /auth/update/{user_id} — update display name ─────────────────────────
 # Only the name field is updated. Returns full user object so frontend can refresh.
 @router.put("/update/{user_id}")
-def update_user(user_id: int, req: UpdateNameRequest, db: Session = Depends(get_db)):
+def update_user(user_id: int, req: UpdateNameRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.name = req.name
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications)}
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium)}
 
 
 # ── PUT /auth/change-password/{user_id} — verify current pw then update ──────
@@ -119,7 +279,9 @@ class ChangePasswordRequest(BaseModel):
     new_password:     str
 
 @router.put("/change-password/{user_id}")
-def change_password(user_id: int, req: ChangePasswordRequest, db: Session = Depends(get_db)):
+def change_password(user_id: int, req: ChangePasswordRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -137,7 +299,9 @@ class NotificationsRequest(BaseModel):
     email_notifications: bool
 
 @router.put("/notifications/{user_id}")
-def update_notifications(user_id: int, req: NotificationsRequest, db: Session = Depends(get_db)):
+def update_notifications(user_id: int, req: NotificationsRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -149,7 +313,9 @@ def update_notifications(user_id: int, req: NotificationsRequest, db: Session = 
 # ── DELETE /auth/delete/{user_id} — permanently remove account ───────────────
 # Cascades to all analyses owned by this user (see models.py relationship).
 @router.delete("/delete/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(user_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -162,7 +328,9 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 # Validates user existence and classification before inserting.
 # Returns the new DB row id so the frontend can track it for future updates.
 @router.post("/history/{user_id}")
-def save_analysis(user_id: int, req: AnalysisIn, db: Session = Depends(get_db)):
+def save_analysis(user_id: int, req: AnalysisIn, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     if req.classification not in VALID_CLASSIFICATIONS:
         raise HTTPException(status_code=400, detail="Invalid classification value")
     if not db.query(User).filter(User.id == user_id).first():
@@ -184,7 +352,9 @@ def save_analysis(user_id: int, req: AnalysisIn, db: Session = Depends(get_db)):
 # Called when the user re-analyzes the same text (history deduplication).
 # Only score and classification change; text and label stay the same.
 @router.put("/history/{user_id}/{analysis_id}")
-def update_analysis(user_id: int, analysis_id: int, req: AnalysisUpdate, db: Session = Depends(get_db)):
+def update_analysis(user_id: int, analysis_id: int, req: AnalysisUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     item = db.query(Analysis).filter(Analysis.id == analysis_id, Analysis.user_id == user_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -196,7 +366,9 @@ def update_analysis(user_id: int, analysis_id: int, req: AnalysisUpdate, db: Ses
 
 # ── DELETE /auth/history/{user_id}/{analysis_id} — remove one analysis ────────
 @router.delete("/history/{user_id}/{analysis_id}")
-def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db)):
+def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     item = db.query(Analysis).filter(Analysis.id == analysis_id, Analysis.user_id == user_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -301,7 +473,9 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 # Returns the 20 most recent analyses, newest first.
 # timestamp is converted to JS-compatible milliseconds (Date.now() format).
 @router.get("/history/{user_id}")
-def get_history(user_id: int, db: Session = Depends(get_db)):
+def get_history(user_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     items = (
         db.query(Analysis)
         .filter(Analysis.user_id == user_id)

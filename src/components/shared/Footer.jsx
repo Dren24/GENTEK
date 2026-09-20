@@ -73,12 +73,12 @@ export default function Footer() {
               <GentekWordmark size={34} textSize="text-base" />
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed mb-5 max-w-xs">
-              AI-powered gender bias detection using Natural Language Processing. Write fairly, communicate inclusively.
+              A practical writing checker for spotting gender-biased language and choosing more inclusive alternatives.
             </p>
             {/* NLP badge */}
             <div className="flex items-center gap-2">
               <BrainIcon size={13} color="#0D9488" faceColor="white" />
-              <span className="text-xs text-gray-400 dark:text-gray-500">Powered by NLP & Machine Learning</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">Built for fair, inclusive writing</span>
             </div>
           </div>
 

@@ -2,6 +2,7 @@ import re
 import os
 import json
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
@@ -11,11 +12,22 @@ HF_API_KEY = os.getenv("HF_API_KEY", "")
 LLM_MODEL  = "meta-llama/Llama-3.1-8B-Instruct"
 CHAT_URL   = "https://router.huggingface.co/v1/chat/completions"
 
+# ── LLM chunking config ────────────────────────────────────────────────────────
+# Llama 3.1 8B's context window is large, but we deliberately keep each request
+# small: it keeps latency/cost predictable and the model focused. Text longer
+# than one chunk is split (never truncated) and every chunk is sent as its own
+# request; findings from all chunks are merged. LLM_MAX_CHUNKS is a safety
+# ceiling on total API calls per analysis (~36,000 chars / ~6,000 words) — the
+# rule-based pattern layer below has no such limit and always covers the full
+# text regardless of length.
+LLM_CHUNK_CHAR_LIMIT = 3000
+LLM_MAX_CHUNKS       = 12
+LLM_MAX_WORKERS      = 5
+
 COLOR_MAP = {
     "MALE-BIASED":    "#3B82F6",
     "FEMALE-BIASED":  "#F43F5E",
     "GENDER-NEUTRAL": "#0D9488",
-    "MIXED-BIAS":     "#F59E0B",
 }
 
 VALID_TYPES = {"male", "female", "stereotype"}
@@ -81,7 +93,7 @@ BIAS_PATTERNS = [
     {"word": "more emotional",          "type": "stereotype", "suggestion": "expressive",                  "reason": "Implies women are less rational"},
     {"word": "men are better",          "type": "male",       "suggestion": "people can excel",            "reason": "Implies male superiority"},
     {"word": "men are natural leaders", "type": "male",       "suggestion": "people can be great leaders", "reason": "Gendered leadership stereotype"},
-    {"word": "women are more emotional","type": "stereotype", "suggestion": "people can be emotional",     "reason": "Gendered emotional stereotype"},
+    {"word": "women are more emotional","type": "female",     "suggestion": "people can be emotional",     "reason": "Gendered emotional stereotype"},
     {"word": "women are naturally better","type": "female",   "suggestion": "people can excel",            "reason": "Implies female superiority in certain roles"},
     {"word": "women are better suited", "type": "female",     "suggestion": "individuals are well-suited", "reason": "Gender-based role assignment"},
     {"word": "nurturing",               "type": "female",     "suggestion": "supportive",                  "reason": "Gendered trait stereotype"},
@@ -92,41 +104,192 @@ BIAS_PATTERNS = [
 # Build a set of known-biased words for fast lookup
 _PATTERN_WORDS = {p["word"].lower() for p in BIAS_PATTERNS}
 
+# ── Context-dependent stereotype words ────────────────────────────────────────
+# These are ordinary English words/adjectives with plenty of non-gendered uses
+# ("the aggressive dog", "nurturing the garden", "a bossy toddler"). Flagging
+# them on a bare word match — regardless of what they're describing — produces
+# false positives. They're only kept as candidates when a person/gender word
+# appears nearby, so the sentence is actually about a person. Explicit gendered
+# nouns, job titles, and full gendered statements ("men are better", etc.) are
+# unambiguous on their own and don't need this check.
+_CONTEXT_DEPENDENT_WORDS = {
+    "overly emotional", "bossy", "hysterical", "aggressive",
+    "less emotional", "more emotional", "nurturing",
+    "supportive roles", "better suited to supportive",
+}
+
+_FEMALE_CONTEXT_WORDS = {
+    "she", "her", "hers", "herself", "woman", "women", "girl", "girls", "female", "females", "lady", "ladies",
+}
+_MALE_CONTEXT_WORDS = {
+    "he", "him", "his", "himself", "man", "men", "boy", "boys", "male", "males", "gentleman", "gentlemen",
+}
+_PERSON_CONTEXT_WORDS = _FEMALE_CONTEXT_WORDS | _MALE_CONTEXT_WORDS | {
+    "they", "them", "their", "theirs", "themselves",
+    "employee", "employees", "worker", "workers", "candidate", "candidates", "colleague", "colleagues",
+    "manager", "leader", "leaders", "staff", "person", "people", "someone", "individual",
+    "boss", "director", "president", "executive", "ceo", "chairman", "chairperson",
+}
+
+_CONTEXT_WINDOW = 60  # chars scanned on each side of a match for a person/gender reference
+
+
+def _has_person_context(text: str, start: int, end: int) -> bool:
+    """True if a person/gender-referring word appears within _CONTEXT_WINDOW
+    characters of the match, i.e. the sentence is actually describing a
+    person — not an unrelated use of the same word."""
+    window = text[max(0, start - _CONTEXT_WINDOW): end + _CONTEXT_WINDOW].lower()
+    return any(re.search(r'\b' + w + r'\b', window) for w in _PERSON_CONTEXT_WORDS)
+
+
+def _context_gender(text: str, start: int, end: int) -> Optional[str]:
+    """Returns 'female' or 'male' based on the nearest gendered pronoun/noun
+    around a match, or None if the context doesn't clearly lean either way
+    (e.g. the subject is 'they', 'the employee', or ungendered). Used to
+    attribute a direction to stereotype-type findings ('aggressive', 'bossy')
+    that carry no gender of their own — their bias direction comes entirely
+    from who the sentence is describing."""
+    window = text[max(0, start - _CONTEXT_WINDOW): end + _CONTEXT_WINDOW].lower()
+    is_female = any(re.search(r'\b' + w + r'\b', window) for w in _FEMALE_CONTEXT_WORDS)
+    is_male   = any(re.search(r'\b' + w + r'\b', window) for w in _MALE_CONTEXT_WORDS)
+    if is_female and not is_male:
+        return "female"
+    if is_male and not is_female:
+        return "male"
+    return None  # both, or neither, present — genuinely ambiguous
+
+
+def _effective_gender(d: Dict) -> Optional[str]:
+    """The gender a detected item counts toward for classification: the type
+    directly for male/female-typed items, or the attached contextual gender
+    for stereotype-typed items whose direction depends on who the sentence is
+    describing. Returns None when that direction can't be determined."""
+    t = d.get("type")
+    if t in ("male", "female"):
+        return t
+    return d.get("_ctx_gender")
+
 
 def _pattern_detect(text: str) -> List[Dict]:
-    """Always-on: returns all known biased patterns found in text."""
+    """Returns known biased patterns found in text. Context-dependent stereotype
+    words (see _CONTEXT_DEPENDENT_WORDS) are only counted when a person/gender
+    word appears nearby, so common non-gendered uses aren't flagged just
+    because the word itself is in the lexicon."""
     lower = text.lower()
-    return [
-        p for p in BIAS_PATTERNS
-        if re.search(r'\b' + re.escape(p["word"].lower()) + r'\b', lower)
-    ]
+    found = []
+    for p in BIAS_PATTERNS:
+        w = p["word"].lower()
+        match = re.search(r'\b' + re.escape(w) + r'\b', lower)
+        if not match:
+            continue
+        if w in _CONTEXT_DEPENDENT_WORDS:
+            if not _has_person_context(text, match.start(), match.end()):
+                continue
+            # "nurturing" is often a verb with a direct object ("nurturing the
+            # garden", "nurturing her plants") rather than a personality trait
+            # ("a nurturing person") — an article/possessive right after it is
+            # the verb form, so skip it even if a person word is elsewhere
+            # in the sentence.
+            if w == "nurturing" and re.match(
+                r'\s+(the|a|an|his|her|their|its|your|my)\b', lower[match.end():match.end() + 12]
+            ):
+                continue
+            if p["type"] == "stereotype":
+                ctx_gender = _context_gender(text, match.start(), match.end())
+                if ctx_gender:
+                    p = {**p, "_ctx_gender": ctx_gender}
+        found.append(p)
+    return found
 
 
-def _llm_analyze(text: str) -> Optional[List[Dict]]:
+def _split_long_unit(unit: str, max_chars: int) -> List[str]:
+    """Last-resort split of a single unit (e.g. one very long sentence) at word
+    boundaries, so no chunk ever exceeds max_chars. Never cuts mid-word."""
+    if len(unit) <= max_chars:
+        return [unit]
+    words = unit.split(' ')
+    chunks, current = [], ''
+    for w in words:
+        candidate = f'{current} {w}'.strip()
+        if len(candidate) > max_chars and current:
+            chunks.append(current)
+            current = w
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _chunk_text(text: str, max_chars: int) -> List[str]:
+    """Splits text into LLM-sized chunks without ever truncating content.
+    Prefers paragraph, then sentence, boundaries so each chunk stays coherent
+    for the model; only falls back to a hard word-boundary split for a single
+    unit (paragraph/sentence) that's still too long on its own."""
+    if len(text) <= max_chars:
+        return [text]
+
+    paragraphs = [p for p in re.split(r'\n\s*\n', text) if p.strip()] or [text]
+
+    units = []
+    for para in paragraphs:
+        if len(para) <= max_chars:
+            units.append(para)
+        else:
+            for sentence in re.split(r'(?<=[.!?])\s+', para):
+                units.extend(_split_long_unit(sentence, max_chars))
+
+    chunks, current = [], ''
+    for unit in units:
+        candidate = f'{current}\n\n{unit}'.strip() if current else unit
+        if len(candidate) > max_chars and current:
+            chunks.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
     """
-    Calls Llama 3.1 to find contextual bias the patterns can't catch
-    (e.g. generic 'he/his', subtle stereotypes). Returns list of detections or None.
+    Calls Llama 3.1 once on a single chunk to find contextual bias the patterns
+    can't catch (e.g. generic 'he/his', subtle stereotypes).
+    Returns a list of detections, [] if the model found nothing, or None if the
+    request itself failed (network error, bad response, timeout, etc).
     """
-    if not HF_API_KEY:
-        return None
-
     prompt = (
-        "You are a gender bias detector. Find gender bias in the text below.\n"
+        "You are a gender bias detector. Read the text below CAREFULLY and find only "
+        "genuine gender bias — judge each candidate by its actual sentence context, "
+        "never by the word alone.\n"
         "Return ONLY a JSON array of detected items — no explanation, no markdown.\n\n"
-        "Flag ONLY:\n"
+        "Flag ONLY when context clearly shows bias:\n"
         "1. Gendered job titles (chairman, fireman, stewardess, housewife, etc.)\n"
         "2. Generic masculine pronouns for unspecified roles: 'he', 'his', 'him' when "
         "the subject is a job title or unnamed person — suggest 'they', 'their', 'them'\n"
-        "3. Clear gender stereotypes ('women are more emotional', 'men are natural leaders')\n\n"
+        "3. A gender (even a single word like 'Men' or 'Women') used to claim a trait, "
+        "role, or expectation applies to that gender specifically "
+        "(e.g. 'Men are expected to be strong leaders', 'Women should be nurturing')\n"
+        "4. A stereotype applied to a specific person or group "
+        "('she was too emotional', 'he needs to be more aggressive to lead')\n\n"
         "Do NOT flag:\n"
         "- Neutral terms: businessperson, chairperson, salesperson, firefighter, police officer, "
         "manager, supervisor, individual, person, people, worker, professional, they/their/them\n"
         "- Any word ending in -person\n"
-        "- 'he/his' referring to a specific named male person\n\n"
+        "- 'he/his' referring to a specific named male person\n"
+        "- Words like 'aggressive', 'nurturing', 'bossy', 'emotional' when describing something "
+        "other than a person (e.g. 'aggressive marketing', 'nurturing the plants')\n"
+        "- A word just because it CAN be gendered — only flag it if this sentence's context "
+        "is actually about gender or a person's gender\n\n"
+        "For each item, write a SHORT reason (max ~12 words) explaining why THIS specific "
+        "occurrence is biased, based on what the sentence actually says — never a generic "
+        "dictionary definition. Example: in 'Men are often expected to be strong leaders', "
+        "the reason for 'Men' is \"Suggests only men are expected to be strong leaders.\"\n\n"
         "JSON array format (return [] if no bias found):\n"
         '[{"word": "exact phrase from text", "type": "male"|"female"|"stereotype", '
-        '"suggestion": "neutral alternative", "reason": "brief explanation"}]\n\n'
-        f'Text:\n"{text[:1200]}"'
+        '"suggestion": "neutral alternative", "reason": "short, specific reason"}]\n\n'
+        f'Text:\n"{text}"'
     )
 
     try:
@@ -136,10 +299,10 @@ def _llm_analyze(text: str) -> Optional[List[Dict]]:
             json={
                 "model": LLM_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 600,
+                "max_tokens": 700,
                 "temperature": 0.05,
             },
-            timeout=25,
+            timeout=20,
         )
         raw = resp.json()["choices"][0]["message"]["content"]
         raw = re.sub(r"```(?:json)?", "", raw).strip()
@@ -152,23 +315,68 @@ def _llm_analyze(text: str) -> Optional[List[Dict]]:
         if not isinstance(items, list):
             return []
 
-        # Validate: word must appear in text, suggestion must differ, type must be valid
+        # Validate: word must appear in this chunk, suggestion must differ, type must be valid
         lower = text.lower()
         clean = []
         for d in items:
             w = d.get("word", "").strip()
             s = d.get("suggestion", "").strip()
+            match = re.search(r'\b' + re.escape(w.lower()) + r'\b', lower) if w else None
             if (w
                     and s
                     and w.lower() != s.lower()          # skip word == suggestion (useless)
                     and d.get("type") in VALID_TYPES
                     and d.get("reason")
-                    and re.search(r'\b' + re.escape(w.lower()) + r'\b', lower)
+                    and match
                     and w.lower() not in NEUTRAL_TERMS):
+                # Stereotype-type LLM findings carry no gender of their own —
+                # attribute one from context, same as pattern-based stereotypes,
+                # so classification stays consistent regardless of source.
+                if d.get("type") == "stereotype":
+                    ctx_gender = _context_gender(text, match.start(), match.end())
+                    if ctx_gender:
+                        d = {**d, "_ctx_gender": ctx_gender}
                 clean.append(d)
         return clean
     except Exception:
         return None
+
+
+def _llm_analyze(text: str) -> Optional[List[Dict]]:
+    """
+    Runs the LLM over the full text, transparently chunking when the text is
+    too long for one request (previously this just silently truncated to the
+    first ~1200 characters — long submissions never got contextual analysis
+    past that point). Findings from every chunk are combined and deduplicated
+    by word. Returns None only if every chunk's request failed, so callers can
+    still tell "LLM unavailable" apart from "LLM ran and found nothing".
+    """
+    if not HF_API_KEY:
+        return None
+
+    chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)[:LLM_MAX_CHUNKS]
+
+    if len(chunks) == 1:
+        return _llm_analyze_chunk(chunks[0])
+
+    combined: List[Dict] = []
+    seen_words = set()
+    any_succeeded = False
+
+    with ThreadPoolExecutor(max_workers=min(len(chunks), LLM_MAX_WORKERS)) as pool:
+        futures = [pool.submit(_llm_analyze_chunk, chunk) for chunk in chunks]
+        for future in as_completed(futures):
+            items = future.result()
+            if items is None:
+                continue  # this chunk's request failed — skip it, other chunks still count
+            any_succeeded = True
+            for d in items:
+                w = d.get("word", "").lower()
+                if w and w not in seen_words:
+                    seen_words.add(w)
+                    combined.append(d)
+
+    return combined if any_succeeded else None
 
 
 def _merge(patterns: List[Dict], llm_items: List[Dict]) -> List[Dict]:
@@ -189,20 +397,21 @@ def _merge(patterns: List[Dict], llm_items: List[Dict]) -> List[Dict]:
 
 
 def _score(detected: List[Dict]) -> tuple:
-    """Returns (label, score) from the merged detection list."""
-    male   = sum(1 for d in detected if d.get("type") == "male")
-    female = sum(1 for d in detected if d.get("type") == "female")
-    stereo = sum(1 for d in detected if d.get("type") == "stereotype")
+    """Returns (label, score) from the merged detection list.
+    Only three classifications exist — Male-Biased, Female-Biased, and
+    Gender-Neutral — no fourth "Mixed" category. Uses _effective_gender() so a
+    stereotype-type item ('aggressive', 'bossy') that's contextually about a
+    specific gender still counts toward that direction. When male and female
+    counts are exactly tied (including a tie at zero, e.g. a stereotype whose
+    direction couldn't be determined from context), it resolves deterministically
+    to Male-Biased."""
+    male   = sum(1 for d in detected if _effective_gender(d) == "male")
+    female = sum(1 for d in detected if _effective_gender(d) == "female")
     n = len(detected)
 
     if n == 0:
         return "GENDER-NEUTRAL", 0
-    if male > female:
-        label = "MALE-BIASED"
-    elif female > male:
-        label = "FEMALE-BIASED"
-    else:
-        label = "MIXED-BIAS"
+    label = "FEMALE-BIASED" if female > male else "MALE-BIASED"
 
     # Score based purely on detection count (not LLM guess)
     if n == 1:   score = 20
@@ -235,10 +444,11 @@ def analyze(text: str) -> dict:
     else:
         detected = patterns
 
-    # Step 4: score
+    # Step 4: score — male/female counts use _effective_gender() so they stay
+    # consistent with the label (see _score's docstring)
     label, score = _score(detected)
-    male   = sum(1 for d in detected if d.get("type") == "male")
-    female = sum(1 for d in detected if d.get("type") == "female")
+    male   = sum(1 for d in detected if _effective_gender(d) == "male")
+    female = sum(1 for d in detected if _effective_gender(d) == "female")
     stereo = sum(1 for d in detected if d.get("type") == "stereotype")
 
     return {

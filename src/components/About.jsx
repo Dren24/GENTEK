@@ -5,7 +5,7 @@ const highlights = [
     icon: Target,
     title: 'Our Goal',
     description:
-      'Build an AI-powered system that helps writers, students, and professionals identify and eliminate gender-biased language using Natural Language Processing.',
+      'Help writers, students, and professionals identify gender-biased language and choose clearer alternatives.',
     color: 'text-violet-400',
     bg: 'bg-violet-500/10',
     border: 'border-violet-500/15',
@@ -14,7 +14,7 @@ const highlights = [
     icon: BookOpen,
     title: 'Why It Matters',
     description:
-      'Gender bias in text reinforces stereotypes and contributes to unequal treatment. GENTEK addresses this using machine learning models trained on curated bias datasets.',
+      'Gender bias in text can reinforce stereotypes and shape how people are perceived. GENTEK makes those patterns easier to notice and revise.',
     color: 'text-cyan-400',
     bg: 'bg-cyan-500/10',
     border: 'border-cyan-500/15',
@@ -40,7 +40,7 @@ export default function About() {
             About <span className="text-gradient">GENTEK</span>
           </h2>
           <p className="text-slate-400 text-lg max-w-2xl leading-relaxed">
-            An AI-powered platform built to promote fair and inclusive communication through NLP-driven language analysis.
+            A writing tool built to promote fair and inclusive communication.
           </p>
         </div>
 
@@ -95,7 +95,7 @@ export default function About() {
               {[
                 { value: '19+', label: 'Bias Patterns', color: 'text-violet-400' },
                 { value: '3',   label: 'Classifications', color: 'text-cyan-400' },
-                { value: '100%', label: 'Browser-based', color: 'text-emerald-400' },
+                { value: 'Fast', label: 'Text Review', color: 'text-emerald-400' },
                 { value: 'Free', label: 'To Get Started', color: 'text-amber-400' },
               ].map((s) => (
                 <div key={s.label} className="p-4 rounded-2xl border border-white/[0.06] bg-navy-800/60 text-center">
@@ -112,7 +112,7 @@ export default function About() {
                 <span className="text-sm font-semibold text-slate-300">Built By</span>
               </div>
               <p className="text-sm text-slate-400 leading-relaxed">
-                GENTEK is built by a team of AI and NLP engineers dedicated to making inclusive language accessible for everyone — from individual writers to organizations.
+                GENTEK is built by a team focused on making inclusive language easier to review, understand, and apply.
               </p>
             </div>
 
@@ -120,10 +120,10 @@ export default function About() {
             <div className="p-5 rounded-2xl border border-white/[0.06] bg-navy-800/40 space-y-3">
               <h4 className="text-sm font-bold text-white">Product Details</h4>
               {[
-                { label: 'Technology',      value: 'AI / NLP / Machine Learning' },
+                { label: 'Technology',      value: 'Text Analysis / AI Assistance' },
                 { label: 'Language',        value: 'English' },
                 { label: 'Bias Types',      value: 'Male, Female, Stereotype' },
-                { label: 'Privacy',         value: 'No text stored or shared' },
+                { label: 'Privacy',         value: 'Guest checks are temporary' },
                 { label: 'Free Plan',       value: 'Available — no card needed' },
               ].map((item) => (
                 <div key={item.label} className="flex items-center justify-between text-sm">

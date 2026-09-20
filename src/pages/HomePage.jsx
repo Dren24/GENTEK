@@ -6,13 +6,14 @@
 // Editor expands to two-column when results are shown (input left, results right).
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  ArrowRight, ArrowLeft, SpinnerGap, WarningCircle, CheckCircle, Trash,
+  ArrowRight, ArrowLeft, SpinnerGap, WarningCircle, Trash,
   UploadSimple, FilePdf, FileDoc, FileTxt,
   Command, ArrowElbowDownLeft, Sparkle, ShieldCheck,
   Lightning, Users, ChartBar, Check, X, CaretDown, CaretUp,
-  CaretRight, Copy,
+  Copy, PencilSimple, CheckCircle,
 } from '@phosphor-icons/react'
 import * as pdfjsLib from 'pdfjs-dist'
 import mammoth from 'mammoth'
@@ -22,6 +23,12 @@ import { BrainIcon, GentekMark } from '../components/shared/GentekLogo'
 import { useAuth } from '../context/AuthContext'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import AuthModal from '../components/shared/AuthModal'
+
+// ── FREE_WORD_LIMIT — max words a Free (non-premium) logged-in user can have
+// analyzed in one go. Configurable without a code change via VITE_FREE_WORD_LIMIT;
+// falls back to 500. Guests keep their own separate GUEST_WORD_LIMIT below —
+// this only applies to logged-in accounts that aren't Premium.
+const FREE_WORD_LIMIT = Number(import.meta.env.VITE_FREE_WORD_LIMIT) || 500
 
 // ── BIAS_PATTERNS — client-side fallback patterns (mirrors backend/analyzer.py) ──
 // Used when the /analyze API is unreachable (network error or dev mode).
@@ -63,21 +70,75 @@ function escapeRx(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+// ── escapeAttr — escapes a string for safe use inside an HTML attribute value ──
+function escapeAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// ── escapeHtml — escapes a string for safe use as HTML text content ──────────
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// ── splitAtWordLimit — splits text into the first `limit` words ("head") and
+// everything after ("tail"). head + tail always reconstructs the exact
+// original text — nothing is ever deleted or altered, only split for display.
+function splitAtWordLimit(text, limit) {
+  if (!Number.isFinite(limit)) return { head: text, tail: '' }
+  const matches = [...text.matchAll(/\S+/g)]
+  if (matches.length <= limit) return { head: text, tail: '' }
+  if (limit <= 0) return { head: '', tail: text }
+  const boundary = matches[limit - 1].index + matches[limit - 1][0].length
+  return { head: text.slice(0, boundary), tail: text.slice(boundary) }
+}
+
+// ── localScore — mirrors backend/analyzer.py's _score() so a single local word
+// fix can update the score/classification instantly, without an API call.
+// Only three classifications exist — Male-Biased, Female-Biased, Gender-Neutral
+// — no fourth "Mixed" category; an exact tie resolves to Male-Biased. ────────
+function localScore(detected) {
+  const male   = detected.filter(d => d.type === 'male').length
+  const female = detected.filter(d => d.type === 'female').length
+  const n = detected.length
+  if (n === 0) return { label: 'GENDER-NEUTRAL', score: 0 }
+  const label = female > male ? 'FEMALE-BIASED' : 'MALE-BIASED'
+  let score
+  if      (n === 1) score = 20
+  else if (n === 2) score = 35
+  else if (n === 3) score = 50
+  else if (n === 4) score = 60
+  else if (n === 5) score = 70
+  else if (n === 6) score = 78
+  else if (n === 7) score = 84
+  else              score = Math.min(95, 84 + (n - 7) * 3)
+  return { label, score }
+}
+
+// ── localColor — mirrors backend/analyzer.py's COLOR_MAP ─────────────────────
+function localColor(label) {
+  return label === 'MALE-BIASED'    ? '#3B82F6'
+       : label === 'FEMALE-BIASED'  ? '#F43F5E'
+       : '#0D9488'
+}
+
 function runAnalysis(text) {
   const detected = BIAS_PATTERNS.filter(p => new RegExp(`\\b${escapeRx(p.word).replace(/\s+/g, '\\s+')}\\b`, 'i').test(text))
   const male   = detected.filter(p => p.type === 'male').length
   const female = detected.filter(p => p.type === 'female').length
   const stereo = detected.filter(p => p.type === 'stereotype').length
   let label = 'GENDER-NEUTRAL', score = 0, color = '#0D9488'
-  if (male > female && male > 0)        { label = 'MALE-BIASED';   score = Math.min(95, 40 + male*15 + stereo*8); color = '#3B82F6' }
-  else if (female > male && female > 0) { label = 'FEMALE-BIASED'; score = Math.min(95, 40 + female*15 + stereo*8); color = '#F43F5E' }
-  else if (detected.length > 0)         { label = 'MIXED-BIAS';    score = Math.min(95, 28 + detected.length*10); color = '#F59E0B' }
+  if (detected.length > 0) {
+    label = female > male ? 'FEMALE-BIASED' : 'MALE-BIASED'
+    score = Math.min(95, 40 + Math.max(male, female) * 15 + stereo * 8)
+    color = label === 'FEMALE-BIASED' ? '#F43F5E' : '#3B82F6'
+  }
   // Build highlighted HTML — escape user text first to prevent XSS, then wrap bias words in <mark>
   let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  detected.forEach(({ word, type }) => {
+  detected.forEach(({ word, type, suggestion, reason }) => {
     const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
-    // $& preserves the original casing from the text (gi flag makes it case-insensitive)
-    html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g,'\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
+    // Data attributes let the results panel show a popup with the original match's casing preserved
+    html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g,'\\s+')}\\b`, 'gi'), (m) =>
+      `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${m}</mark>`)
   })
   return { detected, male, female, stereo, label, score, color, html, words: text.trim().split(/\s+/).length }
 }
@@ -92,39 +153,13 @@ const QUICK = [
   { label: 'Male bias',   key: 'male'       },
 ]
 
-// ── ScoreRing — animated SVG ring showing bias score percentage ───────────────
-// Stroke offset animates from 0 → final value via CSS transition.
-function ScoreRing({ score, color, size = 72 }) {
-  const r = (size / 2) - 7
-  const circ = 2 * Math.PI * r
-  return (
-    <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-      <svg className="w-full h-full -rotate-90" viewBox={`0 0 ${size} ${size}`}>
-        {/* Background track — gray ring */}
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#e2e8f0" strokeWidth="6" className="dark:stroke-gray-700" />
-        {/* Filled arc — length proportional to score */}
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="6"
-          strokeLinecap="round" strokeDasharray={circ}
-          strokeDashoffset={circ - (score/100)*circ}
-          style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.16,1,0.3,1)' }}
-        />
-      </svg>
-      {/* Center label — score % and "bias" text */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="font-extrabold text-gray-900 dark:text-white leading-none" style={{ fontSize: size * 0.22 }}>{score}%</span>
-        <span className="text-gray-400 dark:text-gray-500 leading-none mt-0.5" style={{ fontSize: size * 0.13 }}>bias</span>
-      </div>
-    </div>
-  )
-}
-
 // ── FAQS — accordion questions for the FAQ section ────────────────────────────
 const FAQS = [
-  { q: 'How does GENTEK detect gender bias?',     a: 'GENTEK uses Natural Language Processing (NLP) pattern recognition to scan for gendered terms, stereotypes, and occupational titles that carry implicit bias. Each detected term is classified and mapped to a neutral alternative.' },
-  { q: 'What bias categories does it detect?',    a: 'Three categories: Male-Biased (language centering men as default), Female-Biased (terms that marginalize or over-specify women), and Stereotypes (gendered trait assumptions regardless of direction).' },
-  { q: 'Is my text stored or sent anywhere?',     a: 'No. All analysis runs entirely in your browser. Nothing is sent to any external server. Your writing stays private and never leaves your device.' },
-  { q: 'What types of documents work best?',      a: 'GENTEK is optimized for job advertisements, academic essays, business reports, emails, and policy documents — anywhere gendered language is most impactful.' },
-  { q: 'Is there a word or character limit?',     a: 'The free plan supports up to 5,000 characters per analysis. Pro removes all limits and adds batch processing for large documents.' },
+  { q: 'How does GENTEK find biased language?',   a: 'GENTEK checks your text for gendered terms, role assumptions, and stereotype phrases, then explains each finding in plain language.' },
+  { q: 'What results will I see?',                a: 'You will see a bias category, a score, highlighted terms, short explanations, and inclusive alternatives you can use in your rewrite.' },
+  { q: 'Is my text stored or sent anywhere?',     a: 'Guest analysis is temporary. If you sign in, you can save recent analyses to your account history for later review.' },
+  { q: 'What types of writing work best?',        a: 'GENTEK works best with English essays, emails, job posts, reports, policy drafts, and other professional or academic text.' },
+  { q: 'Do I need an account?',                   a: 'No. You can start analyzing text right away. An account is useful when you want to keep analysis history.' },
 ]
 
 // ── FAQAccordion — expand/collapse FAQ items one at a time ───────────────────
@@ -154,20 +189,20 @@ function FAQAccordion() {
 
 // ── FEATURES — feature cards data for the Features section ───────────────────
 const FEATURES = [
-  { icon: null,        color: 'text-brand-600',   bg: 'bg-brand-50 dark:bg-brand-900/30',     title: 'NLP-Powered Detection',  body: 'Pattern recognition trained on real-world gender bias across occupational, trait, and structural language.' },
-  { icon: Sparkle,     color: 'text-accent-600',  bg: 'bg-amber-50 dark:bg-amber-900/20',    title: 'Smart Suggestions',      body: 'Every flagged term gets a context-aware neutral replacement — not just a list of words to avoid.' },
-  { icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', title: 'Private by Default',     body: 'Analysis runs entirely in your browser. Nothing leaves your device. No account needed to start.' },
-  { icon: ChartBar,    color: 'text-blue-600',    bg: 'bg-blue-50 dark:bg-blue-900/20',      title: 'Bias Score',             body: 'A quantified score shows bias intensity so you can prioritize the most critical changes first.' },
-  { icon: Lightning,   color: 'text-rose-600',    bg: 'bg-rose-50 dark:bg-rose-900/20',      title: 'Real-Time Results',      body: 'Results appear in under 2 seconds. Iterate freely without waiting for a server round-trip.' },
-  { icon: Users,       color: 'text-violet-600',  bg: 'bg-violet-50 dark:bg-violet-900/20',  title: 'Three Bias Directions',  body: 'Identifies male-biased, female-biased, and stereotype language — each color-coded and explained.' },
+  { icon: null,        color: 'text-brand-600',   bg: 'bg-brand-50 dark:bg-brand-900/30',     title: 'Bias Detection',         body: 'Find gendered words, phrases, and role assumptions that can make writing feel less inclusive.' },
+  { icon: Sparkle,     color: 'text-accent-600',  bg: 'bg-amber-50 dark:bg-amber-900/20',    title: 'Inclusive Suggestions',  body: 'Every flagged term includes a clearer alternative, so you can revise with confidence.' },
+  { icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', title: 'Guest-Friendly',         body: 'Start without an account, or sign in when you want to keep your recent analysis history.' },
+  { icon: ChartBar,    color: 'text-blue-600',    bg: 'bg-blue-50 dark:bg-blue-900/20',      title: 'Bias Score',             body: 'A simple score helps you understand how much attention the text may need.' },
+  { icon: Lightning,   color: 'text-rose-600',    bg: 'bg-rose-50 dark:bg-rose-900/20',      title: 'Fast Results',           body: 'Paste your text, run the check, and review highlighted results in seconds.' },
+  { icon: Users,       color: 'text-violet-600',  bg: 'bg-violet-50 dark:bg-violet-900/20',  title: 'Clear Categories',       body: 'See whether the text leans male-biased, female-biased, or gender-neutral.' },
 ]
 
 // ── STEPS — how-it-works numbered step cards ─────────────────────────────────
 const STEPS = [
   { n: '01', title: 'Paste your text',   body: 'Drop in any content — essays, job ads, emails, reports, or policy drafts.' },
-  { n: '02', title: 'Click Analyze',     body: 'GENTEK scans for gendered terms, role assumptions, and stereotype language instantly.' },
-  { n: '03', title: 'Review highlights', body: 'Biased words are color-coded by category with a clear explanation for each finding.' },
-  { n: '04', title: 'Apply fixes',       body: 'Replace flagged terms one-click or rewrite with neutral alternatives provided inline.' },
+  { n: '02', title: 'Run the check',     body: 'GENTEK looks for gendered terms, role assumptions, and stereotype language.' },
+  { n: '03', title: 'Review highlights', body: 'Flagged words are color-coded with a clear explanation for each finding.' },
+  { n: '04', title: 'Revise with clarity', body: 'Use the suggested alternatives to make your writing more inclusive.' },
 ]
 
 // ── PLAN_FEATURES — comparison rows for the inline Pricing section (guests only) ──
@@ -179,214 +214,44 @@ const PLAN_FEATURES = [
   { label: 'Priority processing', free: false,   pro: true        },
 ]
 
-// ── ResultsPanel — right-side panel showing score, highlighted text, suggestions ──
-function ResultsPanel({ analyzing, results, text, onApply, onApplyAll }) {
-  const [copied, setCopied] = useState(false)
+// ── WordPopup — floating card shown when a highlighted word/phrase is clicked ──
+// Closes on outside click. Positioned near the clicked mark via fixed coords.
+function WordPopup({ word, suggestion, reason, type, x, y, onApply, onClose }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [onClose])
 
-  // ── Classification badge color — matches label type ──────────────────────
-  const classColor = !results ? '' :
-    results.label === 'MALE-BIASED'    ? 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700' :
-    results.label === 'FEMALE-BIASED'  ? 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700' :
-    results.label === 'GENDER-NEUTRAL' ? 'bg-brand-100 text-brand-700 border-brand-200 dark:bg-brand-900/30 dark:text-brand-300 dark:border-brand-700' :
-                                         'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700'
-
-  // ── Copy report — pastes label, score, and suggestion list to clipboard ──
-  const copyAll = () => {
-    if (!results) return
-    const lines = results.detected.map(d => `${d.word} → ${d.suggestion}  (${d.reason})`).join('\n')
-    navigator.clipboard.writeText(`GENTEK Analysis\nClassification: ${results.label}\nBias Score: ${results.score}%\n\nSuggestions:\n${lines}`)
-    setCopied(true); setTimeout(() => setCopied(false), 2000)
-  }
-
-
+  const typeLabel = type === 'male' ? 'Male-biased' : type === 'female' ? 'Female-biased' : 'Stereotype'
+  const typeColor = type === 'male' ? 'text-blue-600 dark:text-blue-400' : type === 'female' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-700/80 shadow-editor flex flex-col overflow-hidden h-full">
-
-      {/* ── Panel header — "Analysis Results" label + copy report button ── */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Analysis Results</span>
-          {results?.ai_powered && (
-            <span className="flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 px-2 py-0.5 rounded-full">
-              <Sparkle size={9} weight="fill" />AI
-            </span>
-          )}
-        </div>
-        {/* Copy + Download buttons — only shown when results exist */}
-        {results && (
-          <div className="flex items-center gap-1">
-            <button onClick={copyAll} className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
-              <Copy size={12} />
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-          </div>
-        )}
+    <div
+      ref={ref}
+      className="fixed z-50 w-64 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card-hover p-4"
+      style={{ left: x, top: y, transform: 'translate(-50%, 0)' }}
+    >
+      {/* Header — bias type label + close */}
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className={`text-[10px] font-bold uppercase tracking-widest ${typeColor}`}>{typeLabel}</span>
+        <button onClick={onClose} className="text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 transition-colors">
+          <X size={12} weight="bold" />
+        </button>
       </div>
-
-      {/* ── Scrollable panel body ─────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto editor-scroll">
-
-        {/* Loading skeleton — shown while API call is in progress */}
-        {analyzing && (
-          <div className="p-5 space-y-4 animate-pulse">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-gray-200 dark:bg-gray-700 flex-shrink-0" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded-lg w-2/5" />
-                <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-lg w-1/3" />
-              </div>
-            </div>
-            <div className="h-px bg-gray-100 dark:bg-gray-800" />
-            {[85, 70, 90, 60, 78, 50].map(w => (
-              <div key={w} className="h-3 bg-gray-200 dark:bg-gray-700 rounded-lg" style={{ width: `${w}%` }} />
-            ))}
-            <div className="pt-2 space-y-2">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-14 bg-gray-100 dark:bg-gray-800 rounded-xl" />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Empty state — shown before first analysis */}
-        {!analyzing && !results && (
-          <div className="flex flex-col items-center justify-center h-full py-16 px-6 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-brand-50 dark:bg-brand-900/30 border border-brand-100 dark:border-brand-800 flex items-center justify-center mb-4">
-              <GentekMark size={40} />
-            </div>
-            <p className="font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Results appear here</p>
-            <p className="text-sm text-gray-400 dark:text-gray-500 leading-relaxed max-w-xs">
-              Enter your text on the left and click <strong>Analyze Text</strong> — bias patterns will be highlighted instantly.
-            </p>
-          </div>
-        )}
-
-        {/* ── Results — shown after analysis completes ──────────────────── */}
-        {results && (
-          <div className="p-5 space-y-5">
-
-            {/* Score ring + classification badge + type counts ─────────── */}
-            <div className="flex items-center gap-4">
-              {/* Animated bias score ring */}
-              <ScoreRing score={results.score} color={results.color} size={72} />
-              <div className="flex-1 min-w-0">
-                {/* Classification badge — e.g. MALE-BIASED */}
-                <span className={`inline-flex text-xs font-bold px-2.5 py-1 rounded-full border mb-2 ${classColor}`}>
-                  {results.label}
-                </span>
-                {/* Male / Female / Stereotype count pills */}
-                <div className="flex items-center gap-3 text-xs">
-                  {[
-                    { label: 'Male',   count: results.male,   dot: 'bg-blue-500',  txt: 'text-blue-600 dark:text-blue-400'  },
-                    { label: 'Female', count: results.female, dot: 'bg-rose-500',  txt: 'text-rose-600 dark:text-rose-400'  },
-                    { label: 'Stereo', count: results.stereo, dot: 'bg-amber-500', txt: 'text-amber-600 dark:text-amber-400'},
-                  ].map(b => (
-                    <span key={b.label} className={`flex items-center gap-1 font-semibold ${b.txt}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${b.dot}`} />
-                      {b.label} {b.count}
-                    </span>
-                  ))}
-                </div>
-                {/* Pattern count + word count */}
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
-                  {results.detected.length} pattern{results.detected.length !== 1 ? 's' : ''} · {results.words} words
-                </p>
-              </div>
-            </div>
-
-            <div className="h-px bg-gray-100 dark:bg-gray-800" />
-
-            {results.detected.length > 0 ? (
-              <>
-                {/* Highlighted text block — bias words wrapped in <mark> ── */}
-                <div>
-                  <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Highlighted Text</p>
-                  {/* dangerouslySetInnerHTML is safe here: only our own mark tags injected */}
-                  <div
-                    className="text-[13.5px] text-gray-700 dark:text-gray-200 leading-[1.95] bg-gray-50/70 dark:bg-gray-800/60 rounded-2xl border border-gray-100 dark:border-gray-700 px-4 py-3"
-                    dangerouslySetInnerHTML={{ __html: results.html }}
-                  />
-                  {/* Color legend — three bias types */}
-                  <div className="flex flex-wrap gap-3 mt-2">
-                    {[
-                      { cls: 'bias-male',       label: 'Male-biased'   },
-                      { cls: 'bias-female',     label: 'Female-biased' },
-                      { cls: 'bias-stereotype', label: 'Stereotype'    },
-                    ].map(l => (
-                      <div key={l.label} className="flex items-center gap-1.5">
-                        <mark className={`${l.cls} text-[10px] px-1.5 rounded`}>{l.label.split('-')[0]}</mark>
-                        <span className="text-[11px] text-gray-400 dark:text-gray-500">{l.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="h-px bg-gray-100 dark:bg-gray-800" />
-
-                {/* Suggestion cards — one per detected bias pattern ──────── */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-                      Suggestions ({results.detected.length})
-                    </p>
-                    {/* Apply All — replaces all bias words with suggestions at once */}
-                    <button
-                      onClick={onApplyAll}
-                      className="text-[11px] font-bold text-white bg-brand-600 hover:bg-brand-700 px-3 py-1 rounded-lg transition-colors shadow-sm"
-                    >
-                      Apply All
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {results.detected.map(d => (
-                      <div key={d.word} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 hover:border-brand-200 dark:hover:border-brand-700 transition-colors group">
-                        <CaretRight size={13} className="text-brand-400 mt-0.5 flex-shrink-0" weight="bold" />
-                        <div className="flex-1 min-w-0">
-                          {/* Strikethrough original word → suggestion */}
-                          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                            <span className="text-sm text-gray-400 dark:text-gray-500 line-through leading-tight">{d.word}</span>
-                            <span className="text-sm font-semibold text-brand-700 dark:text-brand-300 leading-tight">{d.suggestion}</span>
-                          </div>
-                          {/* Reason why this word is biased */}
-                          <span className="text-[11px] text-gray-400 dark:text-gray-500 leading-snug">{d.reason}</span>
-                        </div>
-                        {/* Apply button — replaces just this one word in the textarea */}
-                        <button
-                          onClick={() => onApply(d.word, d.suggestion)}
-                          className="flex-shrink-0 text-[11px] font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 hover:bg-brand-100 dark:hover:bg-brand-800/50 border border-brand-100 dark:border-brand-700 px-2.5 py-1 rounded-lg transition-colors"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            ) : (
-              // ── No bias detected — success state ─────────────────────────
-              <div className="flex flex-col items-center text-center py-6 gap-3">
-                <div className="w-12 h-12 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
-                  <CheckCircle size={24} weight="fill" className="text-brand-500" />
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800 dark:text-gray-200 mb-1">No bias detected</p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500">Your text uses gender-inclusive language.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Info note — detection method */}
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-brand-50 dark:bg-brand-900/20 border border-brand-100 dark:border-brand-800">
-              <Sparkle size={13} weight="fill" className="text-brand-500 mt-0.5 flex-shrink-0" />
-              <p className="text-[11px] text-brand-700 dark:text-brand-400 leading-relaxed">
-                {results?.ai_powered
-                  ? 'AI-powered analysis using NLP pattern detection and HuggingFace bias classification.'
-                  : 'Pattern-based gender bias detection. Results highlight gendered words and suggest neutral alternatives.'}
-              </p>
-            </div>
-          </div>
-        )}
+      {/* Detected term + reason */}
+      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">{word}</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed mb-3">{reason}</p>
+      {/* Suggested alternative — click the word itself to apply it */}
+      <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Suggested</p>
+        <button
+          onClick={() => { onApply(word, suggestion); onClose() }}
+          className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline truncate text-left"
+        >
+          {suggestion}
+        </button>
       </div>
     </div>
   )
@@ -394,19 +259,23 @@ function ResultsPanel({ analyzing, results, text, onApply, onApplyAll }) {
 
 // ════════════════════════ HOMEPAGE ════════════════════════════════════════════
 export default function HomePage() {
-  const { user, addToHistory, updateHistory, deleteHistory, lastDeletedId, openPricing } = useAuth()
+  const { user, addToHistory, updateHistory, deleteHistory, lastDeletedId, openPricing, authHeader } = useAuth()
   // ── Guest word limit — enforced in onChange, counter turns red at 100 ────
   const GUEST_WORD_LIMIT = 300
   const location = useLocation()
   const [text, setText]          = useState('')
   const [analyzing, setAna]      = useState(false)
   const [results, setResults]    = useState(null)
+  const [rewrittenText, setRewrittenText] = useState(null)  // generated by "Rewrite Text"; original text stays untouched
+  const [rewriteCopied, setRewriteCopied] = useState(false)
+  const [wordPopup, setWordPopup]         = useState(null) // floating popup for a clicked highlighted word
   const [isTempSession, setTemp] = useState(false)    // true = skip history save
   const [canBack, setCanBack]       = useState(false)
   const [canForward, setCanForward] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)  // login popup on 2nd guest analysis
   const textareaRef              = useRef(null)
+  const overlayRef               = useRef(null)        // mirrors textarea scroll for the Free-limit fade overlay
   const fileInputRef             = useRef(null)
   const analyzeRef               = useRef(null)        // always points to latest analyze fn (avoids stale closure)
   const guestAnalysisCountRef    = useRef(0)           // tracks how many analyses a guest has run
@@ -437,7 +306,7 @@ export default function HomePage() {
     if (stackIdxRef.current <= 0) return
     stackIdxRef.current--
     setText(textStackRef.current[stackIdxRef.current])
-    setResults(null)
+    setResults(null); setRewrittenText(null)
     setCanBack(stackIdxRef.current > 0)
     setCanForward(true)
   }
@@ -447,7 +316,7 @@ export default function HomePage() {
     if (stackIdxRef.current >= textStackRef.current.length - 1) return
     stackIdxRef.current++
     setText(textStackRef.current[stackIdxRef.current])
-    setResults(null)
+    setResults(null); setRewrittenText(null)
     setCanBack(true)
     setCanForward(stackIdxRef.current < textStackRef.current.length - 1)
   }
@@ -485,9 +354,9 @@ export default function HomePage() {
       }
       if (extracted) {
         setText(extracted)
-        setResults(null)
+        setResults(null); setRewrittenText(null)
         pushTextStack(extracted)
-        textareaRef.current?.focus()
+        setTimeout(() => textareaRef.current?.focus(), 50)
       }
     } catch (err) {
       console.error('File parse error:', err)
@@ -511,7 +380,7 @@ export default function HomePage() {
     if (!user) {
       setTemp(false)
       setText('')
-      setResults(null)
+      setResults(null); setRewrittenText(null)
       currentHistoryIdRef.current = null
       clearTextStack()
     }
@@ -522,7 +391,7 @@ export default function HomePage() {
     if (lastDeletedId !== null && lastDeletedId === currentHistoryIdRef.current) {
       delete sessionStacksRef.current[lastDeletedId]
       setText('')
-      setResults(null)
+      setResults(null); setRewrittenText(null)
       currentHistoryIdRef.current = null
       clearTextStack()
       setConfirmDelete(false)
@@ -534,7 +403,7 @@ export default function HomePage() {
     if (location.state?.tempChat) {
       // Temporary session: results won't be saved to history
       setText('')
-      setResults(null)
+      setResults(null); setRewrittenText(null)
       setTemp(true)
       currentHistoryIdRef.current = null
       window.history.replaceState({}, '')
@@ -566,7 +435,7 @@ export default function HomePage() {
       }
 
       setText(saved ? saved.stack[saved.idx] : loaded)
-      setResults(null)
+      setResults(null); setRewrittenText(null)
       setTemp(false)
       currentHistoryIdRef.current = incomingId
       window.history.replaceState({}, '')
@@ -574,7 +443,7 @@ export default function HomePage() {
     } else if (location.state?.newAnalysis) {
       // New Analysis button in sidebar — clear editor
       setText('')
-      setResults(null)
+      setResults(null); setRewrittenText(null)
       setTemp(false)
       currentHistoryIdRef.current = null
       window.history.replaceState({}, '')
@@ -584,15 +453,35 @@ export default function HomePage() {
 
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
   const charCount = text.length
-  const showPanel = analyzing || results   // true = two-column layout
+  const showPanel = analyzing || results   // true = compact hero + hide guest headline
+
+  // ── classificationInfo — display label + dot color for the actual
+  // classification, colored to match that classification's existing color
+  // (same blue/rose/teal used to highlight words in the text and used for
+  // the classification badge/color elsewhere in the app). ──────────────────
+  const classificationInfo = (() => {
+    if (!results) return null
+    if (results.label === 'MALE-BIASED')   return { label: 'Male-Biased',   dot: 'bg-blue-500' }
+    if (results.label === 'FEMALE-BIASED') return { label: 'Female-Biased', dot: 'bg-rose-500' }
+    return { label: 'Gender-Neutral', dot: 'bg-brand-500' }
+  })()
+
+  // ── Free vs Premium word limit — guests use their own separate GUEST_WORD_LIMIT
+  // above and are unaffected here. Premium accounts are never limited. ─────────
+  const isPremium = !!user?.is_premium
+  const freeLimitActive = !!user && !isPremium
+  const { head: analyzableText, tail: lockedTail } = freeLimitActive
+    ? splitAtWordLimit(text, FREE_WORD_LIMIT)
+    : { head: text, tail: '' }
 
   // ── buildHtml — HTML-escapes user text first, then wraps bias words in <mark>
   // Escaping first prevents XSS when text is injected via dangerouslySetInnerHTML.
   const buildHtml = (text, detected) => {
     let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    detected.forEach(({ word, type }) => {
+    detected.forEach(({ word, type, suggestion, reason }) => {
       const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
-      html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g, '\\s+')}\\b`, 'gi'), `<mark class="${cls}">$&</mark>`)
+      html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g, '\\s+')}\\b`, 'gi'), (m) =>
+        `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${m}</mark>`)
     })
     return html
   }
@@ -606,7 +495,7 @@ export default function HomePage() {
     const stereo = Number.isFinite(data.stereo) ? data.stereo : detected.filter(d => d.type === 'stereotype').length
     const label = detected.length === 0
       ? 'GENDER-NEUTRAL'
-      : data.label || (male > female ? 'MALE-BIASED' : female > male ? 'FEMALE-BIASED' : 'MIXED-BIAS')
+      : data.label || (female > male ? 'FEMALE-BIASED' : 'MALE-BIASED')
     const score = detected.length === 0 ? 0 : Math.min(95, Math.max(1, Number(data.score) || 0))
 
     return {
@@ -617,7 +506,7 @@ export default function HomePage() {
       stereo,
       label,
       score,
-      color: data.color || (label === 'MALE-BIASED' ? '#3B82F6' : label === 'FEMALE-BIASED' ? '#F43F5E' : label === 'MIXED-BIAS' ? '#F59E0B' : '#0D9488'),
+      color: data.color || (label === 'MALE-BIASED' ? '#3B82F6' : label === 'FEMALE-BIASED' ? '#F43F5E' : '#0D9488'),
       words: data.words || inputText.trim().split(/\s+/).length,
       html: buildHtml(inputText, detected),
     }
@@ -645,12 +534,12 @@ export default function HomePage() {
       return
     }
 
-    setAna(true); setResults(null)
+    setAna(true); setResults(null); setRewrittenText(null)
     let succeeded = false
     try {
       const res = await fetch('/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
         body: JSON.stringify({ text: inputText }),
       })
       if (!res.ok) throw new Error('API error')
@@ -672,9 +561,15 @@ export default function HomePage() {
     }
     // Only count successful analyses against the guest quota
     if (!user && succeeded) guestAnalysisCountRef.current += 1
-  }, [user, saveToHistory, pushTextStack])
+  }, [user, saveToHistory, pushTextStack, authHeader])
 
-  const analyze = useCallback(() => analyzeText(text), [analyzeText, text])
+  // ── analyze — Free users over the word limit only ever send the analyzable
+  // head to /analyze; the full text (including the locked tail) stays intact
+  // in the editor and is what gets saved to history untouched. ─────────────
+  const analyze = useCallback(
+    () => analyzeText(freeLimitActive && lockedTail ? analyzableText : text),
+    [analyzeText, text, freeLimitActive, lockedTail, analyzableText]
+  )
 
   // ── Keep analyzeRef current so setTimeout-based callers get the latest fn ──
   useEffect(() => { analyzeRef.current = analyze }, [analyze])
@@ -682,10 +577,10 @@ export default function HomePage() {
   // ── loadSample — fills textarea with a pre-written sample text ───────────
   const loadSample = (key) => {
     setText(SAMPLES[key])
-    setResults(null)
+    setResults(null); setRewrittenText(null)
     currentHistoryIdRef.current = null
     pushTextStack(SAMPLES[key])
-    textareaRef.current?.focus()
+    setTimeout(() => textareaRef.current?.focus(), 50)
   }
 
   // ── clear — empties editor and clears current history association ─────────
@@ -694,11 +589,11 @@ export default function HomePage() {
       delete sessionStacksRef.current[currentHistoryIdRef.current]
     }
     setText('')
-    setResults(null)
+    setResults(null); setRewrittenText(null)
     currentHistoryIdRef.current = null
     clearTextStack()
     setConfirmDelete(false)
-    textareaRef.current?.focus()
+    setTimeout(() => textareaRef.current?.focus(), 50)
   }
 
   // ── confirmAndDelete — called by ConfirmModal's onConfirm ────────────────
@@ -722,22 +617,77 @@ export default function HomePage() {
     return result !== src ? result : src.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), suggestion)
   }
 
-  // ── applyFix — replace a single bias word, then re-analyze ─────────────
+  // ── applyFix — replaces one detected word/phrase with its suggestion,
+  // entirely on the client: no re-analysis, no API/LLM call. Only that term's
+  // entry is dropped from `detected` and the score/highlighting recomputed
+  // locally from the remaining items; the rest of the text is untouched. ────
   const applyFix = (word, suggestion) => {
+    if (!results) return
     const newText = replaceBias(text, word, suggestion)
+    const updatedDetected = results.detected.filter(d => d.word.toLowerCase() !== word.toLowerCase())
+    const male   = updatedDetected.filter(d => d.type === 'male').length
+    const female = updatedDetected.filter(d => d.type === 'female').length
+    const stereo = updatedDetected.filter(d => d.type === 'stereotype').length
+    const { label, score } = localScore(updatedDetected)
+
     setText(newText)
-    analyzeText(newText)
+    setResults(prev => ({
+      ...prev,
+      detected: updatedDetected,
+      male, female, stereo,
+      label,
+      score,
+      color: localColor(label),
+      html: buildHtml(newText, updatedDetected),
+      words: newText.trim() ? newText.trim().split(/\s+/).length : 0,
+    }))
+    setRewrittenText(null)  // any previous rewrite was based on the pre-fix text — stale now
+    pushTextStack(newText)
   }
 
-  // ── applyAllFixes — replace all bias words, then re-analyze ──────────────
-  const applyAllFixes = () => {
+  // ── rewriteText — builds a revised version using all suggested alternatives.
+  // Shown in its own card; the original editor text is left untouched ──────
+  const rewriteText = () => {
     if (!results || !results.detected?.length) return
     // Apply longest phrases first to avoid partial replacements
     const sorted = [...results.detected].sort((a, b) => b.word.length - a.word.length)
     let out = text
     sorted.forEach(d => { out = replaceBias(out, d.word, d.suggestion) })
-    setText(out)
-    analyzeText(out)
+    setRewrittenText(out)
+  }
+
+  // ── useRewrittenText — explicit opt-in to replace the editor text with the rewrite ──
+  const useRewrittenText = () => {
+    if (rewrittenText == null) return
+    setText(rewrittenText)
+    setRewrittenText(null)
+    analyzeText(rewrittenText)
+  }
+
+  // ── Close the word popup whenever a new analysis result comes in ─────────
+  useEffect(() => { setWordPopup(null) }, [results])
+
+  // ── handleMarkClick — event delegation: reads data-* off the clicked <mark> ──
+  const handleMarkClick = (e) => {
+    const mark = e.target.closest('mark[data-word]')
+    if (!mark) return
+    const rect = mark.getBoundingClientRect()
+    const clampedX = Math.min(Math.max(rect.left + rect.width / 2, 140), window.innerWidth - 140)
+    setWordPopup({
+      word: mark.dataset.word,
+      suggestion: mark.dataset.suggestion,
+      reason: mark.dataset.reason,
+      type: mark.dataset.type,
+      x: clampedX,
+      y: rect.bottom + 8,
+    })
+  }
+
+  // ── copyRewritten — copies the rewritten text to the clipboard ───────────
+  const copyRewritten = () => {
+    if (!rewrittenText) return
+    navigator.clipboard.writeText(rewrittenText)
+    setRewriteCopied(true); setTimeout(() => setRewriteCopied(false), 2000)
   }
 
   return (
@@ -754,7 +704,7 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-hero-gradient pointer-events-none" />
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[320px] bg-brand-400/8 dark:bg-brand-600/8 blur-3xl rounded-full pointer-events-none" />
 
-        <div className={`relative z-10 w-full transition-all duration-500 ${showPanel ? 'max-w-7xl' : 'max-w-4xl mx-auto'}`}>
+        <div className="relative z-10 w-full max-w-4xl mx-auto transition-all duration-500">
 
           {/* Hero headline + badge — hidden for logged-in users and when panel open */}
           {!user && (
@@ -763,96 +713,150 @@ export default function HomePage() {
               <div className="flex justify-center mb-5">
                 <span className="inline-flex items-center gap-2 bg-white dark:bg-gray-900 border border-brand-200 dark:border-brand-700/60 text-brand-700 dark:text-brand-300 text-xs font-semibold px-4 py-1.5 rounded-full shadow-sm">
                   <Sparkle size={11} weight="fill" className="text-accent-500" />
-                  AI-Powered Gender Bias Analysis — Free, No Account Needed
+                  Gender Bias Checker — Free, No Account Needed
                 </span>
               </div>
               {/* Main headline */}
               <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-gray-900 dark:text-white leading-[1.1] tracking-tight mb-4">
-                Detect Gender Bias<br className="hidden sm:block" />
-                <span className="text-gradient"> in Your Writing</span>
+                Make Your Writing<br className="hidden sm:block" />
+                <span className="text-gradient">More Inclusive</span>
               </h1>
               <p className="text-gray-500 dark:text-gray-400 text-lg max-w-2xl mx-auto leading-relaxed">
-                Paste any text — essays, emails, reports, job descriptions — to receive instant AI-powered gender bias analysis.
+                Paste an essay, email, report, or job post. GENTEK highlights gender-biased language and suggests clearer, more inclusive alternatives.
               </p>
             </div>
           )}
 
-          {/* ── Two-column flex layout — editor left, results right ───────── */}
-          <div className={`flex flex-col lg:flex-row gap-5 ${showPanel ? '' : 'justify-center'}`}>
+          {/* ── Combined Input + Analysis card — one connected analyzer surface ── */}
+          <div
+            className="relative"
+            onDragEnter={onDragEnter}
+            onDragLeave={onDragLeave}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+          >
+            {/* Drag-over overlay — shown when a file is dragged over the editor */}
+            {isDragging && (
+              <div className="absolute inset-0 z-20 rounded-3xl bg-brand-500/10 border-2 border-dashed border-brand-400 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                <UploadSimple size={36} className="text-brand-500" weight="duotone" />
+                <p className="text-sm font-bold text-brand-600 dark:text-brand-400">Drop your file here</p>
+                <p className="text-xs text-brand-400 dark:text-brand-500">PDF, Word (.docx), or TXT</p>
+              </div>
+            )}
+            <div className={`bg-white dark:bg-gray-900 rounded-3xl shadow-editor overflow-hidden border ${isDragging ? 'border-brand-400 dark:border-brand-500' : isTempSession ? 'border-dashed border-amber-400 dark:border-amber-500' : 'border-gray-200 dark:border-gray-700/80'}`}>
 
-            {/* ── LEFT: Text editor card ────────────────────────────────── */}
-            <div
-              className={`relative transition-all duration-500 ${showPanel ? 'lg:w-[48%] flex-shrink-0' : 'w-full max-w-4xl'}`}
-              onDragEnter={onDragEnter}
-              onDragLeave={onDragLeave}
-              onDragOver={onDragOver}
-              onDrop={onDrop}
-            >
-              {/* Drag-over overlay — shown when a file is dragged over the editor */}
-              {isDragging && (
-                <div className="absolute inset-0 z-20 rounded-3xl bg-brand-500/10 border-2 border-dashed border-brand-400 flex flex-col items-center justify-center gap-3 pointer-events-none">
-                  <UploadSimple size={36} className="text-brand-500" weight="duotone" />
-                  <p className="text-sm font-bold text-brand-600 dark:text-brand-400">Drop your file here</p>
-                  <p className="text-xs text-brand-400 dark:text-brand-500">PDF, Word (.docx), or TXT</p>
+              {/* Temporary session indicator banner */}
+              {isTempSession && (
+                <div className="flex items-center justify-between gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+                  <div className="flex items-center gap-2">
+                    {/* Pulsing amber dot */}
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">Temporary session — results won't be saved to history</span>
+                  </div>
+                  {/* Exit temporary mode button */}
+                  <button
+                    onClick={() => setTemp(false)}
+                    title="Exit temporary session"
+                    className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors text-[10px] font-bold underline"
+                  >
+                    Exit
+                  </button>
                 </div>
               )}
-              <div className={`bg-white dark:bg-gray-900 rounded-3xl shadow-editor overflow-hidden border ${isDragging ? 'border-brand-400 dark:border-brand-500' : isTempSession ? 'border-dashed border-amber-400 dark:border-amber-500' : 'border-gray-200 dark:border-gray-700/80'}`}>
 
-                {/* Temporary session indicator banner */}
-                {isTempSession && (
-                  <div className="flex items-center justify-between gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
-                    <div className="flex items-center gap-2">
-                      {/* Pulsing amber dot */}
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
-                      <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">Temporary session — results won't be saved to history</span>
-                    </div>
-                    {/* Exit temporary mode button */}
-                    <button
-                      onClick={() => setTemp(false)}
-                      title="Exit temporary session"
-                      className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors text-[10px] font-bold underline"
-                    >
-                      Exit
-                    </button>
-                  </div>
-                )}
-
-                {/* ── Editor top bar — "Input Text" label + Upload + Delete ── */}
-                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60">
+              {/* ── Top bar — "Input Text" label + AI badge + Upload + Delete ── */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60">
+                <div className="flex items-center gap-2">
                   <span className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Input Text</span>
-                  <div className="flex items-center gap-1">
-                    {/* Upload dropdown — logged-in users only */}
-                    {user && <div className="relative group">
-                      <button className="flex items-center gap-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
-                        <UploadSimple size={13} weight="bold" />Upload
-                      </button>
-                      {/* Hover dropdown — file type options */}
-                      <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
-                        {[
-                          { icon: FilePdf, label: 'Upload PDF',         accept: '.pdf'  },
-                          { icon: FileDoc, label: 'Upload Word (.docx)', accept: '.docx' },
-                          { icon: FileTxt, label: 'Upload TXT',          accept: '.txt'  },
-                        ].map(({ icon: Icon, label, accept }) => (
-                          <button key={label} onClick={() => openFilePicker(accept)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">
-                            <Icon size={14} weight="duotone" />{label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>}
-                    {/* Delete button — opens ConfirmModal */}
-                    {text && (
-                      <button
-                        onClick={() => setConfirmDelete(true)}
-                        className="flex items-center gap-1 text-xs text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 px-2.5 py-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
-                      >
-                        <Trash size={13} weight="bold" />Delete
-                      </button>
-                    )}
-                  </div>
+                  {results?.ai_powered && (
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 px-2 py-0.5 rounded-full">
+                      <Sparkle size={9} weight="fill" />AI
+                    </span>
+                  )}
                 </div>
+                <div className="flex items-center gap-1">
+                  {/* Upload dropdown — logged-in users only */}
+                  {user && <div className="relative group">
+                    <button className="flex items-center gap-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
+                      <UploadSimple size={13} weight="bold" />Upload
+                    </button>
+                    {/* Hover dropdown — file type options */}
+                    <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
+                      {[
+                        { icon: FilePdf, label: 'Upload PDF',         accept: '.pdf'  },
+                        { icon: FileDoc, label: 'Upload Word (.docx)', accept: '.docx' },
+                        { icon: FileTxt, label: 'Upload TXT',          accept: '.txt'  },
+                      ].map(({ icon: Icon, label, accept }) => (
+                        <button key={label} onClick={() => openFilePicker(accept)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">
+                          <Icon size={14} weight="duotone" />{label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>}
+                  {/* Delete button — opens ConfirmModal */}
+                  {text && (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-rose-500 dark:hover:text-rose-400 px-2.5 py-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+                    >
+                      <Trash size={13} weight="bold" />Delete
+                    </button>
+                  )}
+                </div>
+              </div>
 
-                {/* ── Main textarea ───────────────────────────────────────── */}
-                {/* Guests limited to GUEST_WORD_LIMIT=100 words via onChange */}
+              {/* ── Main text area — editable textarea before analysis; the same
+                  spot shows the highlighted, clickable analyzed text afterwards.
+                  Free-tier users past FREE_WORD_LIMIT see the overflow faded and
+                  locked out of analysis, in both states, without losing a word. ── */}
+              {results ? (
+                <div
+                  onClick={handleMarkClick}
+                  className="w-full px-6 py-5 text-[15px] text-gray-800 dark:text-gray-100 leading-relaxed whitespace-pre-wrap editor-scroll cursor-default"
+                  style={{ minHeight: '15rem', maxHeight: '26rem', overflowY: 'auto' }}
+                  dangerouslySetInnerHTML={{
+                    __html: results.html + (lockedTail
+                      ? `<span class="inline-flex items-center gap-1 mx-1 align-middle text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full whitespace-nowrap">🔒 Free limit reached</span><span class="opacity-40">${escapeHtml(lockedTail)}</span>`
+                      : '')
+                  }}
+                />
+              ) : lockedTail ? (
+                // ── Free limit exceeded: a transparent textarea (still the real,
+                // fully-editable input) layered over a matching overlay that shows
+                // the same text with the overflow faded — nothing is truncated. ──
+                <div className="relative">
+                  <div
+                    ref={overlayRef}
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full px-6 py-5 text-[15px] leading-relaxed whitespace-pre-wrap break-words pointer-events-none overflow-hidden editor-scroll"
+                  >
+                    <span className="text-gray-800 dark:text-gray-100">{analyzableText}</span>
+                    <span className="inline-flex items-center gap-1 mx-1 align-middle text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 px-2 py-0.5 rounded-full whitespace-nowrap">
+                      🔒 Free limit reached
+                    </span>
+                    <span className="text-gray-400 dark:text-gray-500 opacity-40">{lockedTail}</span>
+                  </div>
+                  <textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={e => {
+                      setText(e.target.value)
+                      setResults(null); setRewrittenText(null)
+                    }}
+                    onScroll={e => {
+                      if (overlayRef.current) {
+                        overlayRef.current.scrollTop = e.target.scrollTop
+                        overlayRef.current.scrollLeft = e.target.scrollLeft
+                      }
+                    }}
+                    onKeyDown={handleKey}
+                    placeholder="Write, paste, or upload text to analyze for gender-biased language..."
+                    rows={10}
+                    className="relative w-full px-6 py-5 text-[15px] leading-relaxed resize-none outline-none bg-transparent placeholder-gray-300 dark:placeholder-gray-600 editor-scroll text-transparent caret-gray-800 dark:caret-gray-100"
+                    style={{ WebkitTextFillColor: 'transparent' }}
+                  />
+                </div>
+              ) : (
                 <textarea
                   ref={textareaRef}
                   value={text}
@@ -863,20 +867,22 @@ export default function HomePage() {
                       const words = val.trim() ? val.trim().split(/\s+/) : []
                       if (words.length > GUEST_WORD_LIMIT) {
                         setText(words.slice(0, GUEST_WORD_LIMIT).join(' '))
-                        setResults(null)
+                        setResults(null); setRewrittenText(null)
                         return
                       }
                     }
                     setText(val)
-                    setResults(null)
+                    setResults(null); setRewrittenText(null)
                   }}
                   onKeyDown={handleKey}
                   placeholder="Write, paste, or upload text to analyze for gender-biased language..."
-                  rows={showPanel ? 10 : 9}
+                  rows={10}
                   className="w-full px-6 py-5 text-[15px] text-gray-800 dark:text-gray-100 leading-relaxed resize-none outline-none bg-transparent placeholder-gray-300 dark:placeholder-gray-600 editor-scroll"
                 />
+              )}
 
-                {/* ── Quick sample chips — one per SAMPLES entry ────────── */}
+              {/* ── Quick sample chips — guests only ─────────────────────── */}
+              {!user && (
                 <div className="px-5 pb-4 flex flex-wrap gap-2">
                   {QUICK.map(q => (
                     <button
@@ -888,95 +894,194 @@ export default function HomePage() {
                     </button>
                   ))}
                 </div>
+              )}
 
-                {/* ── Bottom status bar — word counter + Analyze button ─── */}
-                <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60 flex-wrap">
-                  <div className="flex items-center gap-3 text-xs">
-                    {!user ? (
-                      <>
-                        {/* Guest word counter — red at limit, amber at 80% */}
-                        <span className={`font-semibold ${wordCount >= GUEST_WORD_LIMIT ? 'text-rose-500' : wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
-                          {wordCount}/{GUEST_WORD_LIMIT} words
-                        </span>
-                        {/* "Upgrade for unlimited" nudge — shown at ≥80 words */}
-                        {wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) && (
-                          <button
-                            onClick={openPricing}
-                            className="text-brand-600 dark:text-brand-400 hover:underline font-semibold"
-                          >
-                            Upgrade for unlimited →
-                          </button>
-                        )}
-                        {/* nudge after both free analyses are used */}
-                        {guestAnalysisCountRef.current >= 2 && wordCount < 80 && (
-                          <button
-                            onClick={() => setShowAuthPrompt(true)}
-                            className="text-amber-600 dark:text-amber-400 hover:underline font-semibold"
-                          >
-                            Sign up to analyze again →
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {/* Logged-in: show word count, char count, keyboard shortcut */}
-                        <span className="text-gray-400 dark:text-gray-500">{wordCount} words</span>
-                        <span className="text-gray-200 dark:text-gray-700">|</span>
-                        <span className="text-gray-400 dark:text-gray-500">{charCount} chars</span>
-                        {/* Cmd+Enter keyboard shortcut hint */}
+              {/* ── Bottom status bar — word counter + Analyze / Rewrite button ── */}
+              <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60 flex-wrap">
+                <div className="flex items-center gap-3 text-xs">
+                  {!user ? (
+                    <>
+                      {/* Guest word counter — red at limit, amber at 80% */}
+                      <span className={`font-semibold ${wordCount >= GUEST_WORD_LIMIT ? 'text-rose-500' : wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        {wordCount}/{GUEST_WORD_LIMIT} words
+                      </span>
+                      {/* "Upgrade for unlimited" nudge — shown at ≥80 words */}
+                      {wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) && (
+                        <button
+                          onClick={openPricing}
+                          className="text-brand-600 dark:text-brand-400 hover:underline font-semibold"
+                        >
+                          Upgrade for unlimited →
+                        </button>
+                      )}
+                      {/* nudge after both free analyses are used */}
+                      {guestAnalysisCountRef.current >= 2 && wordCount < 80 && (
+                        <button
+                          onClick={() => setShowAuthPrompt(true)}
+                          className="text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+                        >
+                          Sign up to analyze again →
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* Logged-in: show word count, char count, keyboard shortcut */}
+                      <span className={lockedTail ? 'font-semibold text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}>
+                        {wordCount} words{lockedTail && ` · ${FREE_WORD_LIMIT} will be analyzed`}
+                      </span>
+                      <span className="text-gray-200 dark:text-gray-700">|</span>
+                      <span className="text-gray-400 dark:text-gray-500">{charCount} chars</span>
+                      {/* Upgrade nudge — Free users who exceeded the word limit */}
+                      {lockedTail && (
+                        <button onClick={openPricing} className="text-brand-600 dark:text-brand-400 hover:underline font-semibold">
+                          Upgrade to Premium →
+                        </button>
+                      )}
+                      {/* Cmd+Enter keyboard shortcut hint — only relevant before analysis */}
+                      {!results && !lockedTail && (
                         <span className="hidden sm:inline-flex items-center gap-1 ml-1 text-gray-300 dark:text-gray-600 font-mono">
                           <Command size={11} /><ArrowElbowDownLeft size={11} /> to analyze
                         </span>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* Try Sample — loads male-biased sample, user must click Analyze */}
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {!results ? (
+                    <>
+                      {/* Try Sample — guests only, loads male-biased sample */}
+                      {!user && (
+                        <button
+                          onClick={() => loadSample('male')}
+                          className="text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-600 px-4 py-2 rounded-xl transition-all"
+                        >
+                          Try Sample
+                        </button>
+                      )}
+                      {/* Analyze button — primary CTA, disabled while analyzing */}
+                      <button
+                        onClick={analyze}
+                        disabled={!text.trim() || analyzing || wordCount < 3}
+                        className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm px-6 py-2 rounded-xl shadow-btn hover:shadow-none active:scale-95 transition-all"
+                      >
+                        {analyzing
+                          ? <><SpinnerGap size={15} className="animate-spin" />Analyzing…</>
+                          : <><BrainIcon size={15} color="white" faceColor="#0D9488" />Analyze Text</>}
+                      </button>
+                    </>
+                  ) : results.detected.length > 0 ? (
+                    /* Rewrite Text — generates a revised version shown separately below */
                     <button
-                      onClick={() => loadSample('male')}
-                      className="text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-600 px-4 py-2 rounded-xl transition-all"
+                      onClick={rewriteText}
+                      className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm px-6 py-2 rounded-xl shadow-btn hover:shadow-none active:scale-95 transition-all"
                     >
-                      Try Sample
+                      <PencilSimple size={14} weight="bold" />
+                      Rewrite Text
                     </button>
-                    {/* Analyze button — primary CTA, disabled while analyzing */}
-                    <button
-                      onClick={analyze}
-                      disabled={!text.trim() || analyzing || wordCount < 3}
-                      className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm px-6 py-2 rounded-xl shadow-btn hover:shadow-none active:scale-95 transition-all"
-                    >
-                      {analyzing
-                        ? <><SpinnerGap size={15} className="animate-spin" />Analyzing…</>
-                        : <><BrainIcon size={15} color="white" faceColor="#0D9488" />Analyze Text</>}
-                    </button>
-                  </div>
+                  ) : (
+                    /* Nothing to rewrite — confirm the text was analyzed, without
+                       claiming certainty that it's guaranteed bias-free */
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 dark:text-brand-400">
+                      <CheckCircle size={16} weight="fill" />
+                      Analyzed — No significant bias detected
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Bias category legend pills — shown below editor, only before results */}
-              {!showPanel && (
-                <div className="flex flex-wrap justify-center gap-2 mt-5">
-                  {[
-                    { label: 'Male-Biased',      c: 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800' },
-                    { label: 'Female-Biased',    c: 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-900/20 dark:text-rose-300 dark:border-rose-800' },
-                    { label: 'Stereotype',       c: 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800' },
-                    { label: 'Gender-Neutral ✓', c: 'bg-brand-50 text-brand-600 border-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:border-brand-800' },
-                  ].map(({ label, c }) => (
-                    <span key={label} className={`text-[11px] font-semibold px-3 py-1 rounded-full border ${c}`}>{label}</span>
-                  ))}
+              {/* ── Analysis percentages — Bias Detected / Gender-Neutral / Classification ── */}
+              {results && (
+                <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" />
+                      <span className="text-sm text-gray-600 dark:text-gray-300">
+                        Bias Detected: <strong className="text-gray-900 dark:text-white tabular-nums">{results.score}%</strong>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
+                      <span className="text-sm text-gray-600 dark:text-gray-300">
+                        Gender-Neutral: <strong className="text-gray-900 dark:text-white tabular-nums">{100 - results.score}%</strong>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${classificationInfo.dot}`} />
+                      <span className="text-sm text-gray-600 dark:text-gray-300">
+                        Classification: <strong className="text-gray-900 dark:text-white">{classificationInfo.label}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ── Result message — deliberately hedged: a 0% score means GENTEK's
+                      analysis found no patterns, not that the text is guaranteed
+                      bias-free. Never claims certainty either way. ─────────────────── */}
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                    {results.score === 0
+                      ? "No significant gender-biased patterns were detected based on GENTEK's analysis."
+                      : 'Potential gender-biased patterns were detected in the text.'}
+                  </p>
+
+                  {/* ── Compact color legend — same classes used to highlight words above,
+                      so colors always match exactly. Sits right under the percentages,
+                      handy after scrolling down through a long analyzed text. ────────── */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 pt-3 border-t border-gray-50 dark:border-gray-800">
+                    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                      <mark className="bias-male text-[9px] font-bold px-1.5 py-0 rounded leading-[1.4]">Male</mark>
+                      Male-Biased
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                      <mark className="bias-female text-[9px] font-bold px-1.5 py-0 rounded leading-[1.4]">Female</mark>
+                      Female-Biased
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                      <mark className="bias-stereotype text-[9px] font-bold px-1.5 py-0 rounded leading-[1.4]">Stereo</mark>
+                      Stereotype
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                      <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
+                      Normal / Gender-Neutral
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* ── RIGHT: Results panel — shown only when analyzing or results exist ── */}
-            {showPanel && (
-              <div className="lg:flex-1 lg:sticky lg:top-20 lg:self-start animate-fade-up" style={{ animationDuration: '0.35s' }}>
-                <ResultsPanel
-                  analyzing={analyzing}
-                  results={results}
-                  text={text}
-                  onApply={applyFix}
-                  onApplyAll={applyAllFixes}
-                />
+            {/* Bias category legend pills — shown below the card, only before analysis */}
+            {!results && !analyzing && (
+              <div className="flex flex-wrap justify-center gap-2 mt-5">
+                {[
+                  { label: 'Male-Biased',      c: 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800' },
+                  { label: 'Female-Biased',    c: 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-900/20 dark:text-rose-300 dark:border-rose-800' },
+                  { label: 'Stereotype',       c: 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800' },
+                  { label: 'Gender-Neutral ✓', c: 'bg-brand-50 text-brand-600 border-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:border-brand-800' },
+                ].map(({ label, c }) => (
+                  <span key={label} className={`text-[11px] font-semibold px-3 py-1 rounded-full border ${c}`}>{label}</span>
+                ))}
+              </div>
+            )}
+
+            {/* ── Rewritten text card — separate section, shown only after
+                "Rewrite Text" is clicked. The card above keeps showing the
+                original analyzed text unless "Use this version" is pressed. ── */}
+            {rewrittenText && (
+              <div className="mt-5 bg-white dark:bg-gray-900 rounded-3xl shadow-editor overflow-hidden border border-gray-200 dark:border-gray-700/80 animate-fade-up" style={{ animationDuration: '0.35s' }}>
+                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60">
+                  <span className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Rewritten Text</span>
+                  <button onClick={copyRewritten} className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
+                    <Copy size={12} />
+                    {rewriteCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <p className="px-6 py-5 text-[15px] text-gray-800 dark:text-gray-100 leading-relaxed whitespace-pre-wrap">
+                  {rewrittenText}
+                </p>
+                <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800">
+                  <button onClick={useRewrittenText} className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+                    Use this version in the editor →
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1172,6 +1277,14 @@ export default function HomePage() {
     {/* ── Auth prompt — shown when guest tries a second analysis ────────────── */}
     {showAuthPrompt && (
       <AuthModal mode="login" onClose={() => setShowAuthPrompt(false)} />
+    )}
+
+    {/* ── Floating popup for the clicked highlighted word ─────────────────
+        Portaled to <body> so it isn't clipped/mispositioned by any
+        transformed ancestor, which would break position:fixed. ─────────── */}
+    {wordPopup && createPortal(
+      <WordPopup {...wordPopup} onApply={applyFix} onClose={() => setWordPopup(null)} />,
+      document.body
     )}
 </>
   )

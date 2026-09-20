@@ -18,6 +18,8 @@ class User(Base):
     email                = Column(String(255), unique=True, index=True, nullable=False)
     password             = Column(String(255), nullable=False)
     email_notifications  = Column(Integer, default=1, server_default='1', nullable=False)
+    is_premium           = Column(Integer, default=0, server_default='0', nullable=False)  # 0 = Free plan, 1 = Premium/Pro
+    google_id            = Column(String(255), unique=True, nullable=True, index=True)  # Google 'sub' claim, if linked
     created_at           = Column(DateTime, default=datetime.utcnow)
 
     # ── Relationship: one user → many analyses (cascade delete) ───────────────
@@ -27,7 +29,7 @@ class User(Base):
 # ── Analysis table ────────────────────────────────────────────────────────────
 # One row per saved analysis. 'label' is the truncated text preview shown in
 # the sidebar. 'classification' is one of MALE-BIASED / FEMALE-BIASED /
-# GENDER-NEUTRAL / MIXED-BIAS. 'score' is the 0–100 bias intensity percentage.
+# GENDER-NEUTRAL. 'score' is the 0–100 bias intensity percentage.
 class Analysis(Base):
     __tablename__ = "analyses"
 

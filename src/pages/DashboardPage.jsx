@@ -1,37 +1,24 @@
 // ── DashboardPage — analytics overview for logged-in users ───────────────────
-// NOTE: This page uses static mock data (RECENT, usedPercent).
-// It is not yet wired to the live SQLite history — that lives in AuthContext.
-// Intended as a future dedicated dashboard route separate from the editor.
+// Rendered inside the shared AppSidebar/Navbar shell like every other
+// logged-in page. Stats and the recent-analyses table are driven by the
+// real history from AuthContext (same data the sidebar shows).
 
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import {
-  TextAa, ChartBar, Clock, Lightning, ArrowRight, ArrowUp, ArrowDown,
-  Export, MagnifyingGlass, DotsThree, Check, Warning,
-} from '@phosphor-icons/react'
+import { ChartBar, Percent, ArrowRight, Lightning, MagnifyingGlass, Check, Warning } from '@phosphor-icons/react'
 
-// ── Mock recent analyses — replace with real history from AuthContext ─────────
-const RECENT = [
-  { id: 1, preview: 'The chairman of the board decided to use his manpower…',     score: 34, verdict: 'MALE-BIASED',    date: '2 min ago',   words: 42 },
-  { id: 2, preview: 'All employees are encouraged to share their ideas freely…',   score: 91, verdict: 'NEUTRAL',        date: '18 min ago',  words: 61 },
-  { id: 3, preview: 'The stewardess informed all passengers that the flight…',     score: 58, verdict: 'FEMALE-BIASED',  date: '1 hr ago',    words: 33 },
-  { id: 4, preview: 'Our workforce spans diverse backgrounds and experiences…',    score: 87, verdict: 'NEUTRAL',        date: 'Yesterday',   words: 88 },
-  { id: 5, preview: 'She was described as overly emotional during the meeting…',   score: 41, verdict: 'STEREOTYPE',     date: 'Yesterday',   words: 54 },
-  { id: 6, preview: 'The businessman and his team presented the quarterly…',       score: 62, verdict: 'MALE-BIASED',    date: '2 days ago',  words: 77 },
-]
-
-// ── Verdict badge color map ────────────────────────────────────────────────────
+// ── Verdict badge color map — matches the classifications used across the app ─
 const VERDICTMETA = {
-  'MALE-BIASED':    { bg: 'bg-blue-50',   text: 'text-blue-700',  ring: 'ring-blue-200' },
-  'FEMALE-BIASED':  { bg: 'bg-rose-50',   text: 'text-rose-700',  ring: 'ring-rose-200' },
-  'STEREOTYPE':     { bg: 'bg-amber-50',  text: 'text-amber-700', ring: 'ring-amber-200' },
-  'NEUTRAL':        { bg: 'bg-green-50',  text: 'text-green-700', ring: 'ring-green-200' },
+  'MALE-BIASED':    { bg: 'bg-blue-50 dark:bg-blue-900/20',   text: 'text-blue-700 dark:text-blue-300',   ring: 'ring-blue-200 dark:ring-blue-800' },
+  'FEMALE-BIASED':  { bg: 'bg-rose-50 dark:bg-rose-900/20',   text: 'text-rose-700 dark:text-rose-300',   ring: 'ring-rose-200 dark:ring-rose-800' },
+  'MIXED-BIAS':     { bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-700 dark:text-amber-300', ring: 'ring-amber-200 dark:ring-amber-800' },
+  'GENDER-NEUTRAL': { bg: 'bg-brand-50 dark:bg-brand-900/20', text: 'text-brand-700 dark:text-brand-300', ring: 'ring-brand-200 dark:ring-brand-800' },
 }
 
 // ── ScorePill — colored percentage number (green ≥80, amber ≥50, red <50) ─────
 function ScorePill({ score }) {
-  const color = score >= 80 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-500'
+  const color = score >= 80 ? 'text-green-600 dark:text-green-400' : score >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500 dark:text-red-400'
   return <span className={`font-bold text-sm tabular-nums ${color}`}>{score}%</span>
 }
 
@@ -45,23 +32,16 @@ function VerdictBadge({ verdict }) {
   )
 }
 
-// ── StatCard — summary metric with icon, value, and optional delta arrow ───────
-function StatCard({ icon: Icon, iconBg, iconColor, label, value, delta, deltaDir }) {
+// ── StatCard — summary metric with icon and value ─────────────────────────────
+function StatCard({ icon: Icon, iconBg, iconColor, label, value }) {
   return (
     <div className="card p-5 flex gap-4 items-start">
       <div className={`w-11 h-11 rounded-2xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
         <Icon size={20} weight="duotone" className={iconColor} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-400 font-medium mb-0.5">{label}</p>
-        <p className="text-2xl font-bold text-gray-900 leading-none mb-1">{value}</p>
-        {/* Delta trend — green arrow up, red arrow down */}
-        {delta && (
-          <p className={`text-xs flex items-center gap-0.5 font-medium ${deltaDir === 'up' ? 'text-green-500' : 'text-red-400'}`}>
-            {deltaDir === 'up' ? <ArrowUp size={11} weight="bold" /> : <ArrowDown size={11} weight="bold" />}
-            {delta}
-          </p>
-        )}
+        <p className="text-xs text-gray-400 dark:text-gray-500 font-medium mb-0.5">{label}</p>
+        <p className="text-2xl font-bold text-gray-900 dark:text-white leading-none">{value}</p>
       </div>
     </div>
   )
@@ -69,63 +49,45 @@ function StatCard({ icon: Icon, iconBg, iconColor, label, value, delta, deltaDir
 
 // ════════════════════════ DASHBOARD PAGE ══════════════════════════════════════
 export default function DashboardPage() {
-  const { user } = useAuth()
+  const { user, history } = useAuth()
   const [search, setSearch] = useState('')
 
   // ── Redirect guests — dashboard requires auth ──────────────────────────────
   // Must be after all hooks (Rules of Hooks)
   if (!user) return <Navigate to="/" replace />
 
-  // ── Filter RECENT rows by preview text or verdict ─────────────────────────
-  const filtered = RECENT.filter((r) =>
-    r.preview.toLowerCase().includes(search.toLowerCase()) ||
-    r.verdict.toLowerCase().includes(search.toLowerCase())
+  // ── Filter history by preview text or classification ─────────────────────
+  const filtered = history.filter((r) =>
+    r.label.toLowerCase().includes(search.toLowerCase()) ||
+    r.classification.toLowerCase().includes(search.toLowerCase())
   )
 
-  const usedPercent = 37   // mock: 74 / 200 free-tier analyses used (37%)
+  const neutralCount = history.filter(r => r.classification === 'GENDER-NEUTRAL').length
+  const biasedCount  = history.length - neutralCount
+  const avgScore     = history.length ? Math.round(history.reduce((sum, r) => sum + r.score, 0) / history.length) : 0
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <main className="min-h-screen bg-gray-50 dark:bg-gray-950 pt-20 pb-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
 
-      {/* ── Top sticky header — GENTEK wordmark + New Analysis button ────── */}
-      <header className="sticky top-0 z-40 bg-white border-b border-gray-100 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
-          {/* GENTEK logo link home */}
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center">
-              <TextAa size={14} weight="bold" className="text-white" />
-            </div>
-            <span className="font-bold text-gray-900 text-sm">GENTEK</span>
-          </Link>
-
-          <div className="flex items-center gap-3 ml-auto">
-            {/* New Analysis shortcut — links to detector */}
-            <Link to="/detector" className="btn-primary text-xs px-4 py-2">
-              New Analysis
-              <ArrowRight size={13} weight="bold" />
-            </Link>
-            {/* User avatar placeholder — "AB" initials */}
-            <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-xs">
-              AB
-            </div>
+        {/* ── Greeting heading + New Analysis shortcut ─────────────────────── */}
+        <div className="mb-8 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome back, {user.name} 👋</h1>
+            <p className="text-gray-400 dark:text-gray-500 text-sm mt-0.5">Here&rsquo;s a summary of your recent activity.</p>
           </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex-1">
-
-        {/* ── Greeting heading ──────────────────────────────────────────── */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Welcome back, {user.name} 👋</h1>
-          <p className="text-gray-400 text-sm mt-0.5">Here&rsquo;s a summary of your recent activity.</p>
+          <Link to="/" state={{ newAnalysis: true }} className="btn-primary text-xs px-4 py-2">
+            New Analysis
+            <ArrowRight size={13} weight="bold" />
+          </Link>
         </div>
 
-        {/* ── Stats row — 4 metric cards across ────────────────────────── */}
+        {/* ── Stats row — derived from real saved history ──────────────────── */}
         <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
-          <StatCard icon={ChartBar}  iconBg="bg-brand-50"  iconColor="text-brand-600" label="Total Analyses"   value="74"   delta="12 this week"       deltaDir="up"   />
-          <StatCard icon={Check}     iconBg="bg-green-50"  iconColor="text-green-600" label="Neutral Texts"    value="31"   delta="42% of total"        deltaDir="up"   />
-          <StatCard icon={Warning}   iconBg="bg-amber-50"  iconColor="text-amber-600" label="Biased Detected"  value="43"   delta="58% of total"        deltaDir="down" />
-          <StatCard icon={Clock}     iconBg="bg-blue-50"   iconColor="text-blue-600"  label="Avg. Bias Score"  value="63%"  delta="↑ 4% vs last week"   deltaDir="up"   />
+          <StatCard icon={ChartBar} iconBg="bg-brand-50 dark:bg-brand-900/30"  iconColor="text-brand-600 dark:text-brand-400"  label="Total Analyses"  value={history.length} />
+          <StatCard icon={Check}    iconBg="bg-green-50 dark:bg-green-900/30" iconColor="text-green-600 dark:text-green-400" label="Neutral Texts"   value={neutralCount} />
+          <StatCard icon={Warning}  iconBg="bg-amber-50 dark:bg-amber-900/30" iconColor="text-amber-600 dark:text-amber-400" label="Biased Detected" value={biasedCount} />
+          <StatCard icon={Percent}  iconBg="bg-blue-50 dark:bg-blue-900/30"   iconColor="text-blue-600 dark:text-blue-400"   label="Avg. Bias Score" value={`${avgScore}%`} />
         </div>
 
         {/* ── Main content grid — analyses table + right widgets ─────────── */}
@@ -133,56 +95,49 @@ export default function DashboardPage() {
 
           {/* ── Recent analyses table — left 2/3 ────────────────────────── */}
           <div className="xl:col-span-2 card overflow-hidden">
-            {/* Table header — title + search + export */}
-            <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between gap-3">
-              <h2 className="font-bold text-gray-900 text-sm">Recent Analyses</h2>
-              <div className="flex items-center gap-2 flex-1 max-w-xs ml-auto">
-                {/* Search filter input */}
-                <div className="relative flex-1">
-                  <MagnifyingGlass size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search…"
-                    className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-200"
-                  />
-                </div>
-                {/* Export button — icon only */}
-                <button className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors" title="Export">
-                  <Export size={15} />
-                </button>
+            {/* Table header — title + search */}
+            <div className="px-5 py-4 border-b border-gray-50 dark:border-gray-800 flex items-center justify-between gap-3">
+              <h2 className="font-bold text-gray-900 dark:text-white text-sm">Recent Analyses</h2>
+              <div className="relative flex-1 max-w-xs ml-auto">
+                <MagnifyingGlass size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300 dark:text-gray-600" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-200 dark:focus:ring-brand-800"
+                />
               </div>
             </div>
 
-            {/* Table rows — one per analysis */}
-            <div className="divide-y divide-gray-50">
+            {/* Table rows — one per history entry, click loads it in the analyzer */}
+            <div className="divide-y divide-gray-50 dark:divide-gray-800">
               {filtered.length === 0 && (
-                <div className="py-12 text-center text-sm text-gray-400">No analyses match your search.</div>
+                <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">
+                  {history.length === 0 ? 'No analyses yet — run your first check to see it here.' : 'No analyses match your search.'}
+                </div>
               )}
               {filtered.map((row) => (
-                <div key={row.id} className="px-5 py-3.5 flex items-start gap-3 hover:bg-gray-50/60 transition-colors group">
+                <Link
+                  key={row.id}
+                  to="/"
+                  state={{ loadText: row.text, historyId: row.id }}
+                  className="px-5 py-3.5 flex items-start gap-3 hover:bg-gray-50/60 dark:hover:bg-gray-800/60 transition-colors group"
+                >
                   <div className="flex-1 min-w-0">
-                    {/* Analysis text preview (truncated) */}
-                    <p className="text-sm text-gray-700 truncate leading-snug">{row.preview}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{row.words} words · {row.date}</p>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 truncate leading-snug">{row.label}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{row.group}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* Bias score percentage */}
                     <ScorePill score={row.score} />
-                    {/* Verdict pill — Male-biased, Female-biased, Stereotype, Neutral */}
-                    <VerdictBadge verdict={row.verdict} />
-                    {/* Three-dot actions menu — appears on row hover */}
-                    <button className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-gray-200 text-gray-400 transition-all">
-                      <DotsThree size={15} weight="bold" />
-                    </button>
+                    <VerdictBadge verdict={row.classification} />
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
 
-            {/* Table footer — link to detector */}
-            <div className="px-5 py-3 border-t border-gray-50 text-center">
-              <Link to="/detector" className="text-xs font-medium text-brand-600 hover:underline">
+            {/* Table footer — link back to the analyzer */}
+            <div className="px-5 py-3 border-t border-gray-50 dark:border-gray-800 text-center">
+              <Link to="/" state={{ newAnalysis: true }} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
                 Start a new analysis →
               </Link>
             </div>
@@ -191,74 +146,51 @@ export default function DashboardPage() {
           {/* ── Right widget column ──────────────────────────────────────── */}
           <div className="space-y-5">
 
-            {/* Usage tracker — progress bar + upgrade CTA */}
-            <div className="card p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-gray-900 text-sm">Monthly Usage</h2>
-                <span className="text-xs text-gray-400">Free Plan</span>
-              </div>
-              <div className="flex items-end justify-between mb-2">
-                <span className="text-3xl font-bold text-gray-900">74</span>
-                <span className="text-sm text-gray-400">/ 200 analyses</span>
-              </div>
-              {/* Progress bar — width = usedPercent % */}
-              <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden mb-2">
-                <div
-                  className="h-full rounded-full bg-brand-500 transition-all"
-                  style={{ width: `${usedPercent}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-400">126 analyses remaining this month</p>
-              {/* Upgrade to Pro CTA */}
-              <Link to="/pricing" className="btn-primary w-full justify-center mt-4 text-xs py-2.5">
-                <Lightning size={13} weight="fill" />
-                Upgrade to Pro
-              </Link>
-            </div>
-
-            {/* Current plan card — shows free plan features */}
-            <div className="card p-5 border-2 border-dashed border-gray-100">
-              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">Current Plan</p>
+            {/* Current plan card — reflects the account's actual is_premium status */}
+            <div className="card p-5 border-2 border-dashed border-gray-100 dark:border-gray-800">
+              <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Current Plan</p>
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-lg font-bold text-gray-900">Free</p>
-                  <p className="text-sm text-gray-400">$0 / forever</p>
+                  <p className="text-lg font-bold text-gray-900 dark:text-white">{user.is_premium ? 'Pro' : 'Free'}</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">{user.is_premium ? '$9 / month' : '$0 / forever'}</p>
                 </div>
-                <span className="text-xs font-bold text-gray-400 border border-gray-200 rounded-full px-3 py-1">Active</span>
+                <span className="text-xs font-bold text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded-full px-3 py-1">Active</span>
               </div>
-              {/* Free plan feature list */}
               <ul className="space-y-2 mb-4">
-                {['200 analyses / month', 'Basic detection', '3 suggestions max', 'Word highlighting'].map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-xs text-gray-500">
-                    <Check size={12} weight="bold" className="text-gray-400" />
+                {(user.is_premium
+                  ? ['Unlimited analyses', 'Advanced detection', 'Unlimited suggestions', 'Full analysis history']
+                  : ['200 analyses / month', 'Basic detection', '3 suggestions max', 'Word highlighting']
+                ).map((f) => (
+                  <li key={f} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <Check size={12} weight="bold" className="text-gray-400 dark:text-gray-500" />
                     {f}
                   </li>
                 ))}
               </ul>
-              {/* View Pro features link */}
-              <Link to="/pricing" className="btn-outline w-full justify-center text-xs py-2.5">
-                View Pro features
-              </Link>
+              {!user.is_premium && (
+                <Link to="/pricing" className="btn-outline w-full justify-center text-xs py-2.5">
+                  View Pro features
+                </Link>
+              )}
             </div>
 
-            {/* Quick analyze textarea widget — links to full detector */}
-            <div className="card p-5">
-              <h2 className="font-bold text-gray-900 text-sm mb-3">Quick Analyze</h2>
-              <textarea
-                rows={4}
-                placeholder="Paste text here to check for gender bias…"
-                className="w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-700 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-200 resize-none mb-3"
-              />
-              {/* Redirect to homepage editor for full analysis */}
-              <Link to="/detector" className="btn-primary w-full justify-center text-xs py-2.5">
-                Open Full Detector
-                <ArrowRight size={12} weight="bold" />
-              </Link>
-            </div>
+            {/* Go Pro nudge — Free users only; Premium accounts already see their status above */}
+            {!user.is_premium && (
+              <div className="card p-5">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
+                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Pro</span>
+                </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mb-3">Unlimited analyses, exports, API access and history.</p>
+                <Link to="/pricing" className="btn-primary w-full justify-center text-xs py-2.5">
+                  Upgrade →
+                </Link>
+              </div>
+            )}
 
           </div>
         </div>
       </div>
-    </div>
+    </main>
   )
 }

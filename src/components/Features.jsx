@@ -12,7 +12,7 @@ const features = [
     icon: MagnifyingGlass,
     title: 'Real-time Bias Detection',
     description:
-      'Instantly scan any text for gender-biased words, phrases, and structural patterns using a trained NLP model.',
+      'Instantly scan text for gender-biased words, phrases, and role assumptions.',
     color: 'text-violet-400',
     bg: 'bg-violet-500/10',
     border: 'border-violet-500/15',
@@ -42,7 +42,7 @@ const features = [
     icon: Lightbulb,
     title: 'Smart Suggestions',
     description:
-      'Get AI-generated inclusive alternatives for every flagged word or phrase.',
+      'Get inclusive alternatives for every flagged word or phrase.',
     color: 'text-amber-400',
     bg: 'bg-amber-500/10',
     border: 'border-amber-500/15',

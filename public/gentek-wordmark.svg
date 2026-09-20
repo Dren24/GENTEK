@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="120" viewBox="0 0 420 120" role="img" aria-label="GENTEK logo">
+  <rect x="16" y="16" width="88" height="88" rx="25" fill="#0D9488"/>
+  <path fill="#FFFFFF" d="M60 28 C56.5 24.5 51.2 23.7 46.8 26.3 C43.3 22.8 37.2 22.8 33.7 27.2 C29.3 31.6 29.3 38.7 31.9 44 C28.4 46.6 26.6 51.9 29.3 57.2 C31.9 62.5 38.1 65.1 43.4 64.2 L43.4 73 L60 73 Z"/>
+  <path fill="#FFFFFF" d="M60 28 C63.5 24.5 68.8 23.7 73.2 26.3 C76.7 22.8 82.8 22.8 86.3 27.2 C90.7 31.6 90.7 38.7 88.1 44 C91.6 46.6 93.4 51.9 90.7 57.2 C88.1 62.5 81.9 65.1 76.6 64.2 L76.6 73 L60 73 Z"/>
+  <rect x="43.4" y="71.2" width="33.2" height="8.8" rx="4.4" fill="#FFFFFF"/>
+  <circle cx="45.2" cy="50.8" r="4" fill="#0D9488"/>
+  <circle cx="74.8" cy="50.8" r="4" fill="#0D9488"/>
+  <path d="M49.6 61.3 Q60 70.1 70.4 61.3" stroke="#0D9488" stroke-width="3.1" stroke-linecap="round" fill="none"/>
+  <text x="128" y="76" font-family="Inter, Arial, Helvetica, sans-serif" font-size="48" font-weight="800" letter-spacing="0" fill="#111827">GEN</text>
+  <text x="226" y="76" font-family="Inter, Arial, Helvetica, sans-serif" font-size="48" font-weight="800" letter-spacing="0" fill="#0D9488">TEK</text>
+</svg>
