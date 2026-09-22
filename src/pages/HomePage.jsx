@@ -247,7 +247,7 @@ function WordPopup({ word, suggestion, reason, type, x, y, onApply, onClose }) {
         <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Suggested</p>
         <button
           onClick={() => { onApply(word, suggestion); onClose() }}
-          className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline truncate text-left"
+          className="block w-full text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline text-left whitespace-normal break-words"
         >
           {suggestion}
         </button>
