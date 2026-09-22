@@ -312,6 +312,11 @@ def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
             },
             timeout=20,
         )
+        if resp.status_code != 200:
+            # Surface the API's actual error (e.g. depleted credits, invalid
+            # key, rate limit) instead of a bare KeyError from indexing into
+            # an error body that has no "choices" key.
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
         raw = resp.json()["choices"][0]["message"]["content"]
         raw = re.sub(r"```(?:json)?", "", raw).strip()
 
