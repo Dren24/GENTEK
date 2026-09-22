@@ -6,8 +6,9 @@
 import { useState } from 'react'
 import {
   X, CheckCircle, CreditCard, Bank, Copy, ArrowRight,
-  Check, UploadSimple, Warning,
+  Check, UploadSimple, Warning, SpinnerGap,
 } from '@phosphor-icons/react'
+import { useAuth } from '../../context/AuthContext'
 
 // ── Payment method tab definitions ────────────────────────────────────────────
 const METHODS = [
@@ -274,7 +275,9 @@ function CardForm() {
 }
 
 // ── SuccessScreen — shown after user submits payment; replaces form ─────────────
-function SuccessScreen({ plan, onClose }) {
+// onDone closes the whole modal stack (Payment + Pricing) so the user lands
+// back in the app and immediately sees their new Premium status.
+function SuccessScreen({ plan, onDone }) {
   return (
     <div className="flex flex-col items-center justify-center py-8 text-center space-y-4">
       {/* Green checkmark with confetti emoji overlay */}
@@ -285,18 +288,16 @@ function SuccessScreen({ plan, onClose }) {
         <div className="absolute -top-1 -right-1 text-xl">🎉</div>
       </div>
       <div>
-        <h3 className="text-xl font-bold text-white mb-1">Payment Submitted!</h3>
+        <h3 className="text-xl font-bold text-white mb-1">You're Premium!</h3>
         <p className="text-gray-400 text-sm max-w-xs">
-          Your <span className="text-white font-semibold">{plan}</span> plan upgrade is being processed.
-          We'll notify you once it's confirmed.
+          Your <span className="text-white font-semibold">{plan}</span> plan is active — unlimited analyses, advanced detection, and full history are unlocked now.
         </p>
       </div>
       {/* Status summary table */}
       <div className="w-full bg-gray-800 rounded-xl p-4 text-left space-y-2">
         {[
-          { label: 'Status',    val: 'Pending verification',     color: 'text-amber-400' },
+          { label: 'Status',    val: 'Active',                   color: 'text-green-400' },
           { label: 'Plan',      val: plan,                       color: 'text-white'     },
-          { label: 'Email',     val: 'Check your inbox',         color: 'text-gray-300'  },
         ].map(r => (
           <div key={r.label} className="flex justify-between text-sm">
             <span className="text-gray-500">{r.label}</span>
@@ -304,9 +305,9 @@ function SuccessScreen({ plan, onClose }) {
           </div>
         ))}
       </div>
-      {/* Back to GENTEK — closes PaymentModal */}
+      {/* Back to GENTEK — closes the whole modal stack, revealing the now-Premium UI */}
       <button
-        onClick={onClose}
+        onClick={onDone}
         className="w-full py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition-colors"
       >
         Got it — Back to GENTEK
@@ -316,14 +317,31 @@ function SuccessScreen({ plan, onClose }) {
 }
 
 // ════════════════════════ PAYMENT MODAL ══════════════════════════════════════
-export default function PaymentModal({ plan, onClose }) {
-  const [method, setMethod] = useState('gcash')   // active payment method tab
-  const [success, setSuccess] = useState(false)   // true after submit → show SuccessScreen
+export default function PaymentModal({ plan, onClose, onUpgraded }) {
+  const { upgradeToPremium } = useAuth()
+  const [method, setMethod]       = useState('gcash')   // active payment method tab
+  const [success, setSuccess]     = useState(false)     // true after submit → show SuccessScreen
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]         = useState('')
 
   if (!plan) return null
 
   // Active method's brand color — applied to Submit button background
   const methodColor = METHODS.find(m => m.id === method)?.color || '#3B82F6'
+
+  // ── handleSubmit — activates Premium on the account, then shows success ────
+  const handleSubmit = async () => {
+    setSubmitting(true)
+    setError('')
+    try {
+      await upgradeToPremium()
+      setSuccess(true)
+    } catch (err) {
+      setError(err.message || 'Something went wrong — please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
@@ -346,7 +364,7 @@ export default function PaymentModal({ plan, onClose }) {
         <div className="p-6 max-h-[90vh] overflow-y-auto">
           {success ? (
             // ── Success screen replaces form after submit ──────────────────
-            <SuccessScreen plan={plan.name} onClose={onClose} />
+            <SuccessScreen plan={plan.name} onDone={onUpgraded || onClose} />
           ) : (
             <>
               {/* ── Header — plan name + price ───────────────────────────── */}
@@ -388,14 +406,21 @@ export default function PaymentModal({ plan, onClose }) {
                 {method === 'card'  && <CardForm />}
               </div>
 
+              {/* Error banner — shown if activating Premium failed */}
+              {error && (
+                <p className="text-xs text-rose-400 bg-rose-900/20 border border-rose-800 rounded-xl px-3 py-2 text-center mb-3">{error}</p>
+              )}
+
               {/* ── Submit button — color matches active payment method ───── */}
               <button
-                onClick={() => setSuccess(true)}
-                className="w-full py-3 rounded-xl text-white font-bold text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-95"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="w-full py-3 rounded-xl text-white font-bold text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{ background: methodColor }}
               >
-                {method === 'card' ? 'Pay Now' : 'Submit Payment'}
-                <ArrowRight size={15} weight="bold" />
+                {submitting
+                  ? <><SpinnerGap size={15} className="animate-spin" />Processing…</>
+                  : <>{method === 'card' ? 'Pay Now' : 'Submit Payment'}<ArrowRight size={15} weight="bold" /></>}
               </button>
             </>
           )}

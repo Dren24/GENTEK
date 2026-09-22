@@ -198,7 +198,13 @@ export default function PricingModal() {
       </div>
 
       {/* ── PaymentModal — opens on top of PricingModal when user clicks upgrade ── */}
-      {paying && <PaymentModal plan={paying} onClose={() => setPaying(null)} />}
+      {paying && (
+        <PaymentModal
+          plan={paying}
+          onClose={() => setPaying(null)}
+          onUpgraded={() => { setPaying(null); closePricing() }}
+        />
+      )}
     </div>
   )
 }

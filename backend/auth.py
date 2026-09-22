@@ -273,6 +273,25 @@ def update_user(user_id: int, req: UpdateNameRequest, db: Session = Depends(get_
     return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium)}
 
 
+# ── PUT /auth/upgrade/{user_id} — activate Premium on the account ────────────
+# GENTEK has no real payment gateway integration — this marks the account
+# Premium once the (currently UI-only) payment form is submitted. The backend
+# is still the source of truth: is_premium is persisted here, not just set in
+# frontend state, so it survives refresh/re-login and every other endpoint
+# that reads is_premium (word limits, plan badges) picks it up immediately.
+@router.put("/upgrade/{user_id}")
+def upgrade_to_premium(user_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_premium = 1
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium)}
+
+
 # ── PUT /auth/change-password/{user_id} — verify current pw then update ──────
 class ChangePasswordRequest(BaseModel):
     current_password: str
@@ -308,6 +327,23 @@ def update_notifications(user_id: int, req: NotificationsRequest, db: Session = 
     user.email_notifications = 1 if req.email_notifications else 0
     db.commit()
     return {"email_notifications": bool(user.email_notifications)}
+
+
+# ── PUT /auth/upgrade/{user_id} — activate Premium ────────────────────────────
+# GENTEK's checkout (PaymentModal.jsx) is a UI-only demo — no real payment
+# gateway is wired up. This is what "Submit Payment" actually calls once the
+# user completes that flow, so the account is genuinely marked Premium instead
+# of just showing a success screen with no effect.
+@router.put("/upgrade/{user_id}")
+def upgrade_to_premium(user_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    if current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_premium = 1
+    db.commit()
+    return {"is_premium": bool(user.is_premium)}
 
 
 # ── DELETE /auth/delete/{user_id} — permanently remove account ───────────────

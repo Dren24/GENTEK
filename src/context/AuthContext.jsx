@@ -277,6 +277,18 @@ export function AuthProvider({ children }) {
     }).catch(() => {})
   }
 
+  // ── upgradeToPremium — PUT /auth/upgrade/{id}, called when the checkout
+  // flow (PaymentModal) completes; grants Premium immediately — see
+  // backend/auth.py for why there's no real payment gateway behind this. ────
+  const upgradeToPremium = async () => {
+    if (!user?.id) return
+    const res = await authFetch(`/auth/upgrade/${user.id}`, { method: 'PUT' })
+    if (!res.ok) throw new Error('Could not activate Premium')
+    const updated = { ...user, is_premium: true }
+    setUser(updated)
+    ;(rememberMe ? localStorage : sessionStorage).setItem('gentek-user', JSON.stringify(updated))
+  }
+
   // ── deleteAccount — permanently remove account from DB then log out ─────────
   const deleteAccount = async () => {
     if (!user?.id) return
@@ -294,7 +306,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, authHeader, login, loginWithGoogle, register, logout, updateUser, updateNotifications, deleteAccount,
+      user, token, authHeader, login, loginWithGoogle, register, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,
