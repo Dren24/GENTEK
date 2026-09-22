@@ -32,6 +32,11 @@ COLOR_MAP = {
 
 VALID_TYPES = {"male", "female", "stereotype"}
 
+# ── TEMP diagnostic — last LLM failure reason, surfaced in /analyze's response
+# below so it's visible without needing server log access. Remove once the
+# live-deployment LLM failure is diagnosed and fixed. ─────────────────────────
+_last_llm_error = None
+
 # Terms that are already gender-neutral — never flag these
 NEUTRAL_TERMS = {
     "businessperson", "businesspeople", "chairperson", "salesperson", "salesperson",
@@ -343,7 +348,9 @@ def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
         # from "found nothing" — log the actual cause (bad/expired key, rate limit,
         # network error, unexpected response shape) so it shows up in server logs
         # instead of only being diagnosable by comparing prod vs. local behavior.
-        print(f"[analyzer] LLM chunk request failed: {type(e).__name__}: {e}")
+        global _last_llm_error
+        _last_llm_error = f"{type(e).__name__}: {e}"
+        print(f"[analyzer] LLM chunk request failed: {_last_llm_error}")
         return None
 
 
@@ -357,6 +364,8 @@ def _llm_analyze(text: str) -> Optional[List[Dict]]:
     still tell "LLM unavailable" apart from "LLM ran and found nothing".
     """
     if not HF_API_KEY:
+        global _last_llm_error
+        _last_llm_error = "HF_API_KEY not set"
         print("[analyzer] WARNING: HF_API_KEY not set — falling back to rule-based detection only (no contextual/LLM coverage).")
         return None
 
@@ -467,4 +476,7 @@ def analyze(text: str) -> dict:
         "color":      COLOR_MAP[label],
         "words":      words,
         "ai_powered": ai_powered,
+        # TEMP diagnostic field — see _last_llm_error definition above; remove
+        # once the live-deployment LLM failure is diagnosed and fixed.
+        "_debug_llm_error": None if ai_powered else _last_llm_error,
     }
