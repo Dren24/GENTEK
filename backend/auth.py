@@ -32,7 +32,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # anyone forge tokens for any user. If JWT_SECRET isn't set, generate a random
 # one for this process (existing sessions won't survive a restart, but that's
 # far safer than a guessable default). Set JWT_SECRET in production.
-_JWT_SECRET = os.getenv("JWT_SECRET")
+_JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 if not _JWT_SECRET:
     _JWT_SECRET = secrets.token_hex(32)
     print("[auth] WARNING: JWT_SECRET not set — using a random secret for this process only. Set JWT_SECRET in your environment for stable sessions across restarts.")
@@ -94,7 +94,7 @@ VALID_CLASSIFICATIONS = {"MALE-BIASED", "FEMALE-BIASED", "GENDER-NEUTRAL"}
 # Cloud Console (the same value the frontend uses as VITE_GOOGLE_CLIENT_ID).
 # Never store a Google client *secret* here — the token-client flow used by the
 # frontend doesn't need one, only the client ID (which is not a secret).
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 GOOGLE_USERINFO_URL  = "https://www.googleapis.com/oauth2/v3/userinfo"
 
@@ -415,8 +415,8 @@ def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db
 
 # ── Email helper — sends password reset link via Gmail SMTP ──────────────────
 def send_reset_email(to_email: str, to_name: str, reset_url: str):
-    gmail_user     = os.getenv("GMAIL_USER", "")
-    gmail_password = os.getenv("GMAIL_APP_PASSWORD", "")
+    gmail_user     = os.getenv("GMAIL_USER", "").strip()
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
     if not gmail_user or not gmail_password:
         return  # silently skip if not configured
 
@@ -468,7 +468,7 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
         expires_at = datetime.utcnow() + timedelta(hours=1)
         db.add(PasswordResetToken(user_id=user.id, token=token, expires_at=expires_at))
         db.commit()
-        app_url   = os.getenv("APP_URL", "http://localhost:5173")
+        app_url   = os.getenv("APP_URL", "http://localhost:5173").strip()
         reset_url = f"{app_url}/reset-password?token={token}"
         # On Vercel, a serverless function's execution can be frozen/killed as
         # soon as the response is sent — a background thread isn't guaranteed

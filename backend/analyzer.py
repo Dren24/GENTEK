@@ -8,7 +8,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-HF_API_KEY = os.getenv("HF_API_KEY", "")
+# .strip() guards against a trailing newline/whitespace sneaking into the env
+# var value (e.g. from a copy-paste into a hosting platform's dashboard) —
+# that alone is enough to make `requests` reject the Authorization header
+# outright, silently degrading every analysis to rule-based-only detection.
+HF_API_KEY = os.getenv("HF_API_KEY", "").strip()
 LLM_MODEL  = "meta-llama/Llama-3.1-8B-Instruct"
 CHAT_URL   = "https://router.huggingface.co/v1/chat/completions"
 
@@ -30,11 +34,11 @@ COLOR_MAP = {
     "GENDER-NEUTRAL": "#0D9488",
 }
 
-VALID_TYPES = {"male", "female", "stereotype"}
+VALID_TYPES = {"male", "female"}
 
-# ── TEMP diagnostic — last LLM failure reason, surfaced in /analyze's response
-# below so it's visible without needing server log access. Remove once the
-# live-deployment LLM failure is diagnosed and fixed. ─────────────────────────
+# ── Last LLM failure reason (bad key, network error, etc) — logged via print
+# in _llm_analyze/_llm_analyze_chunk below so it shows up in server logs
+# instead of being indistinguishable from "the LLM found nothing". ───────────
 _last_llm_error = None
 
 # Terms that are already gender-neutral — never flag these
@@ -165,14 +169,11 @@ def _context_gender(text: str, start: int, end: int) -> Optional[str]:
 
 
 def _effective_gender(d: Dict) -> Optional[str]:
-    """The gender a detected item counts toward for classification: the type
-    directly for male/female-typed items, or the attached contextual gender
-    for stereotype-typed items whose direction depends on who the sentence is
-    describing. Returns None when that direction can't be determined."""
-    t = d.get("type")
-    if t in ("male", "female"):
-        return t
-    return d.get("_ctx_gender")
+    """The gender a detected item counts toward for classification. Every
+    detected item's type is resolved to "male"/"female" at detection time
+    (stereotype-flavored matches included — see _pattern_detect/_llm_analyze_chunk),
+    so this is just the type itself."""
+    return d.get("type")
 
 
 def _pattern_detect(text: str) -> List[Dict]:
@@ -200,9 +201,10 @@ def _pattern_detect(text: str) -> List[Dict]:
             ):
                 continue
             if p["type"] == "stereotype":
-                ctx_gender = _context_gender(text, match.start(), match.end())
-                if ctx_gender:
-                    p = {**p, "_ctx_gender": ctx_gender}
+                # Stereotype is a source-list grouping, not an output category —
+                # resolve directly to whichever gender the stereotype targets in
+                # context, same tie-break as _score() when direction is ambiguous.
+                p = {**p, "type": _context_gender(text, match.start(), match.end()) or "male"}
         found.append(p)
     return found
 
@@ -276,8 +278,9 @@ def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
         "3. A gender (even a single word like 'Men' or 'Women') used to claim a trait, "
         "role, or expectation applies to that gender specifically "
         "(e.g. 'Men are expected to be strong leaders', 'Women should be nurturing')\n"
-        "4. A stereotype applied to a specific person or group "
-        "('she was too emotional', 'he needs to be more aggressive to lead')\n\n"
+        "4. A stereotype applied to a specific person or group based on their gender "
+        "('she was too emotional', 'he needs to be more aggressive to lead') — set "
+        "type to whichever gender the stereotype targets in context\n\n"
         "Do NOT flag:\n"
         "- Neutral terms: businessperson, chairperson, salesperson, firefighter, police officer, "
         "manager, supervisor, individual, person, people, worker, professional, they/their/them\n"
@@ -292,7 +295,7 @@ def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
         "dictionary definition. Example: in 'Men are often expected to be strong leaders', "
         "the reason for 'Men' is \"Suggests only men are expected to be strong leaders.\"\n\n"
         "JSON array format (return [] if no bias found):\n"
-        '[{"word": "exact phrase from text", "type": "male"|"female"|"stereotype", '
+        '[{"word": "exact phrase from text", "type": "male"|"female", '
         '"suggestion": "neutral alternative", "reason": "short, specific reason"}]\n\n'
         f'Text:\n"{text}"'
     )
@@ -327,21 +330,21 @@ def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
             w = d.get("word", "").strip()
             s = d.get("suggestion", "").strip()
             match = re.search(r'\b' + re.escape(w.lower()) + r'\b', lower) if w else None
+            # The prompt asks for "male"/"female" directly, but defensively
+            # resolve "stereotype" too in case the model emits it anyway —
+            # same context-based resolution as pattern-based stereotypes,
+            # so a detection is never dropped just for using the old label.
+            item_type = d.get("type")
+            if item_type == "stereotype" and match:
+                item_type = _context_gender(text, match.start(), match.end()) or "male"
             if (w
                     and s
                     and w.lower() != s.lower()          # skip word == suggestion (useless)
-                    and d.get("type") in VALID_TYPES
+                    and item_type in VALID_TYPES
                     and d.get("reason")
                     and match
                     and w.lower() not in NEUTRAL_TERMS):
-                # Stereotype-type LLM findings carry no gender of their own —
-                # attribute one from context, same as pattern-based stereotypes,
-                # so classification stays consistent regardless of source.
-                if d.get("type") == "stereotype":
-                    ctx_gender = _context_gender(text, match.start(), match.end())
-                    if ctx_gender:
-                        d = {**d, "_ctx_gender": ctx_gender}
-                clean.append(d)
+                clean.append({**d, "type": item_type})
         return clean
     except Exception as e:
         # Silently returning None here used to make LLM failures indistinguishable
@@ -414,12 +417,12 @@ def _merge(patterns: List[Dict], llm_items: List[Dict]) -> List[Dict]:
 def _score(detected: List[Dict]) -> tuple:
     """Returns (label, score) from the merged detection list.
     Only three classifications exist — Male-Biased, Female-Biased, and
-    Gender-Neutral — no fourth "Mixed" category. Uses _effective_gender() so a
-    stereotype-type item ('aggressive', 'bossy') that's contextually about a
-    specific gender still counts toward that direction. When male and female
-    counts are exactly tied (including a tie at zero, e.g. a stereotype whose
-    direction couldn't be determined from context), it resolves deterministically
-    to Male-Biased."""
+    Gender-Neutral — no fourth "Mixed" category. Every item is already
+    resolved to "male" or "female" by the time it reaches here (stereotype-
+    flavored words like 'aggressive'/'bossy' included — see _pattern_detect),
+    so _effective_gender() is just reading that type. When male and female
+    counts are exactly tied (n=0 included), it resolves deterministically to
+    Male-Biased."""
     male   = sum(1 for d in detected if _effective_gender(d) == "male")
     female = sum(1 for d in detected if _effective_gender(d) == "female")
     n = len(detected)
@@ -464,19 +467,14 @@ def analyze(text: str) -> dict:
     label, score = _score(detected)
     male   = sum(1 for d in detected if _effective_gender(d) == "male")
     female = sum(1 for d in detected if _effective_gender(d) == "female")
-    stereo = sum(1 for d in detected if d.get("type") == "stereotype")
 
     return {
         "detected":   detected,
         "male":       male,
         "female":     female,
-        "stereo":     stereo,
         "label":      label,
         "score":      score,
         "color":      COLOR_MAP[label],
         "words":      words,
         "ai_powered": ai_powered,
-        # TEMP diagnostic field — see _last_llm_error definition above; remove
-        # once the live-deployment LLM failure is diagnosed and fixed.
-        "_debug_llm_error": None if ai_powered else _last_llm_error,
     }

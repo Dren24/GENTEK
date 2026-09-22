@@ -106,7 +106,7 @@ export default function AboutPage() {
                 <div className="space-y-2.5">
                   {[
                     { label: 'Bias Patterns',     value: '19+ detected' },
-                    { label: 'Classifications',    value: 'Male, Female, Stereotype' },
+                    { label: 'Classifications',    value: 'Male-Biased, Female-Biased, Gender-Neutral' },
                     { label: 'Language Support',   value: 'English' },
                     { label: 'Analysis Speed',     value: 'Real-time' },
                     { label: 'Free Plan',          value: 'Available — no card needed' },

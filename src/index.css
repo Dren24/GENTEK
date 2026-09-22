@@ -100,17 +100,6 @@
     cursor: pointer;
   }
   .dark .bias-female { background: rgba(244,63,94,0.20); color: #fda4af; }
-
-  .bias-stereotype {
-    background: rgba(245,158,11,0.12);
-    border-bottom: 2px solid #F59E0B;
-    color: #B45309;
-    padding: 1px 3px;
-    border-radius: 3px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .dark .bias-stereotype { background: rgba(245,158,11,0.20); color: #fcd34d; }
 }
 
 /* Scroll reveal */

@@ -47,11 +47,11 @@ const BIAS_PATTERNS = [
   { word: 'lady doctor',     type: 'female',     suggestion: 'doctor',                reason: 'The "lady" prefix is unnecessary'            },
   { word: 'girl boss',       type: 'female',     suggestion: 'leader',                reason: '"Girl" is infantilizing for professionals'   },
   { word: 'spinster',        type: 'female',     suggestion: 'unmarried person',      reason: 'Gendered and stigmatizing term'              },
-  { word: 'overly emotional',type: 'stereotype', suggestion: 'highly expressive',     reason: 'Gendered emotional stereotype'               },
-  { word: 'bossy',           type: 'stereotype', suggestion: 'assertive',             reason: 'Term disproportionately applied to women'    },
-  { word: 'hysterical',      type: 'stereotype', suggestion: 'overwhelmed',           reason: "Historically used to dismiss women's feelings"},
+  { word: 'overly emotional',type: 'male',       suggestion: 'highly expressive',     reason: 'Gendered emotional stereotype'               },
+  { word: 'bossy',           type: 'female',     suggestion: 'assertive',             reason: 'Term disproportionately applied to women'    },
+  { word: 'hysterical',      type: 'female',     suggestion: 'overwhelmed',           reason: "Historically used to dismiss women's feelings"},
   { word: 'nurturing',       type: 'female',     suggestion: 'supportive',            reason: 'Gendered trait stereotype'                   },
-  { word: 'aggressive',      type: 'stereotype', suggestion: 'assertive',             reason: 'Often applied unfairly by gender context'    },
+  { word: 'aggressive',      type: 'male',       suggestion: 'assertive',             reason: 'Often applied unfairly by gender context'    },
 ]
 
 // ── SAMPLES — pre-written example texts for each quick-load chip ──────────────
@@ -125,22 +125,21 @@ function runAnalysis(text) {
   const detected = BIAS_PATTERNS.filter(p => new RegExp(`\\b${escapeRx(p.word).replace(/\s+/g, '\\s+')}\\b`, 'i').test(text))
   const male   = detected.filter(p => p.type === 'male').length
   const female = detected.filter(p => p.type === 'female').length
-  const stereo = detected.filter(p => p.type === 'stereotype').length
   let label = 'GENDER-NEUTRAL', score = 0, color = '#0D9488'
   if (detected.length > 0) {
     label = female > male ? 'FEMALE-BIASED' : 'MALE-BIASED'
-    score = Math.min(95, 40 + Math.max(male, female) * 15 + stereo * 8)
+    score = Math.min(95, 40 + Math.max(male, female) * 15)
     color = label === 'FEMALE-BIASED' ? '#F43F5E' : '#3B82F6'
   }
   // Build highlighted HTML — escape user text first to prevent XSS, then wrap bias words in <mark>
   let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   detected.forEach(({ word, type, suggestion, reason }) => {
-    const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
+    const cls = type === 'male' ? 'bias-male' : 'bias-female'
     // Data attributes let the results panel show a popup with the original match's casing preserved
     html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g,'\\s+')}\\b`, 'gi'), (m) =>
       `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${m}</mark>`)
   })
-  return { detected, male, female, stereo, label, score, color, html, words: text.trim().split(/\s+/).length }
+  return { detected, male, female, label, score, color, html, words: text.trim().split(/\s+/).length }
 }
 
 // ── Quick-load chip definitions — maps label → sample key ─────────────────────
@@ -224,8 +223,8 @@ function WordPopup({ word, suggestion, reason, type, x, y, onApply, onClose }) {
     return () => document.removeEventListener('mousedown', h)
   }, [onClose])
 
-  const typeLabel = type === 'male' ? 'Male-biased' : type === 'female' ? 'Female-biased' : 'Stereotype'
-  const typeColor = type === 'male' ? 'text-blue-600 dark:text-blue-400' : type === 'female' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
+  const typeLabel = type === 'female' ? 'Female-biased' : 'Male-biased'
+  const typeColor = type === 'female' ? 'text-rose-600 dark:text-rose-400' : 'text-blue-600 dark:text-blue-400'
 
   return (
     <div
@@ -477,7 +476,7 @@ export default function HomePage() {
   const buildHtml = (text, detected) => {
     let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     detected.forEach(({ word, type, suggestion, reason }) => {
-      const cls = type === 'male' ? 'bias-male' : type === 'female' ? 'bias-female' : 'bias-stereotype'
+      const cls = type === 'male' ? 'bias-male' : 'bias-female'
       html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g, '\\s+')}\\b`, 'gi'), (m) =>
         `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${m}</mark>`)
     })
@@ -490,7 +489,6 @@ export default function HomePage() {
     const detected = Array.isArray(data.detected) ? data.detected : []
     const male = Number.isFinite(data.male) ? data.male : detected.filter(d => d.type === 'male').length
     const female = Number.isFinite(data.female) ? data.female : detected.filter(d => d.type === 'female').length
-    const stereo = Number.isFinite(data.stereo) ? data.stereo : detected.filter(d => d.type === 'stereotype').length
     const label = detected.length === 0
       ? 'GENDER-NEUTRAL'
       : data.label || (female > male ? 'FEMALE-BIASED' : 'MALE-BIASED')
@@ -501,7 +499,6 @@ export default function HomePage() {
       detected,
       male,
       female,
-      stereo,
       label,
       score,
       color: data.color || (label === 'MALE-BIASED' ? '#3B82F6' : label === 'FEMALE-BIASED' ? '#F43F5E' : '#0D9488'),
@@ -631,14 +628,13 @@ export default function HomePage() {
     const updatedDetected = results.detected.filter(d => d.word.toLowerCase() !== word.toLowerCase())
     const male   = updatedDetected.filter(d => d.type === 'male').length
     const female = updatedDetected.filter(d => d.type === 'female').length
-    const stereo = updatedDetected.filter(d => d.type === 'stereotype').length
     const { label, score } = localScore(updatedDetected)
 
     setText(newText)
     setResults(prev => ({
       ...prev,
       detected: updatedDetected,
-      male, female, stereo,
+      male, female,
       label,
       score,
       color: localColor(label),
@@ -1028,10 +1024,6 @@ export default function HomePage() {
                       Female-Biased
                     </span>
                     <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
-                      <mark className="bias-stereotype text-[9px] font-bold px-1.5 py-0 rounded leading-[1.4]">Stereo</mark>
-                      Stereotype
-                    </span>
-                    <span className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
                       <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
                       Normal / Gender-Neutral
                     </span>
@@ -1046,7 +1038,6 @@ export default function HomePage() {
                 {[
                   { label: 'Male-Biased',      c: 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800' },
                   { label: 'Female-Biased',    c: 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-900/20 dark:text-rose-300 dark:border-rose-800' },
-                  { label: 'Stereotype',       c: 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800' },
                   { label: 'Gender-Neutral ✓', c: 'bg-brand-50 text-brand-600 border-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:border-brand-800' },
                 ].map(({ label, c }) => (
                   <span key={label} className={`text-[11px] font-semibold px-3 py-1 rounded-full border ${c}`}>{label}</span>
