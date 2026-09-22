@@ -6,7 +6,14 @@
     },
     "backend": {
       "root": "backend",
-      "framework": "fastapi"
+      "framework": "fastapi",
+      "entrypoint": "main:app"
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/health",    "destination": { "service": "backend" } },
+    { "source": "/analyze",   "destination": { "service": "backend" } },
+    { "source": "/auth/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)",      "destination": { "service": "frontend" } }
+  ]
 }
