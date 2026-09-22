@@ -434,12 +434,19 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
         db.commit()
         app_url   = os.getenv("APP_URL", "http://localhost:5173")
         reset_url = f"{app_url}/reset-password?token={token}"
-        # Send email in background thread so the API response is never blocked
-        threading.Thread(
-            target=send_reset_email,
-            args=(user.email, user.name, reset_url),
-            daemon=True,
-        ).start()
+        # On Vercel, a serverless function's execution can be frozen/killed as
+        # soon as the response is sent — a background thread isn't guaranteed
+        # to finish, so send synchronously there. Everywhere else (Docker,
+        # Railway, local dev) keep it backgrounded so the response isn't
+        # delayed by the SMTP round-trip.
+        if os.getenv("VERCEL"):
+            send_reset_email(user.email, user.name, reset_url)
+        else:
+            threading.Thread(
+                target=send_reset_email,
+                args=(user.email, user.name, reset_url),
+                daemon=True,
+            ).start()
     # Never return reset_url — it would leak whether the email is registered
     return {"message": "If that email exists, a reset link has been sent."}
 
