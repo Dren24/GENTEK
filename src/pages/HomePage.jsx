@@ -47,10 +47,10 @@ const BIAS_PATTERNS = [
   { word: 'lady doctor',     type: 'female',     suggestion: 'doctor',                reason: 'The "lady" prefix is unnecessary'            },
   { word: 'girl boss',       type: 'female',     suggestion: 'leader',                reason: '"Girl" is infantilizing for professionals'   },
   { word: 'spinster',        type: 'female',     suggestion: 'unmarried person',      reason: 'Gendered and stigmatizing term'              },
-  { word: 'overly emotional',type: 'male',       suggestion: 'highly expressive',     reason: 'Gendered emotional stereotype'               },
+  { word: 'overly emotional',type: 'male',       suggestion: 'highly expressive',     reason: 'Gendered emotional characterization'         },
   { word: 'bossy',           type: 'female',     suggestion: 'assertive',             reason: 'Term disproportionately applied to women'    },
   { word: 'hysterical',      type: 'female',     suggestion: 'overwhelmed',           reason: "Historically used to dismiss women's feelings"},
-  { word: 'nurturing',       type: 'female',     suggestion: 'supportive',            reason: 'Gendered trait stereotype'                   },
+  { word: 'nurturing',       type: 'female',     suggestion: 'supportive',            reason: 'Gendered trait assumption'                   },
   { word: 'aggressive',      type: 'male',       suggestion: 'assertive',             reason: 'Often applied unfairly by gender context'    },
 ]
 
@@ -154,7 +154,7 @@ const QUICK = [
 
 // ── FAQS — accordion questions for the FAQ section ────────────────────────────
 const FAQS = [
-  { q: 'How does GENTEK find biased language?',   a: 'GENTEK checks your text for gendered terms, role assumptions, and stereotype phrases, then explains each finding in plain language.' },
+  { q: 'How does GENTEK find biased language?',   a: 'GENTEK checks your text for gendered terms and role assumptions, then explains each finding in plain language.' },
   { q: 'What results will I see?',                a: 'You will see a bias category, a score, highlighted terms, short explanations, and inclusive alternatives you can use in your rewrite.' },
   { q: 'Is my text stored or sent anywhere?',     a: 'Guest analysis is temporary. If you sign in, you can save recent analyses to your account history for later review.' },
   { q: 'What types of writing work best?',        a: 'GENTEK works best with English essays, emails, job posts, reports, policy drafts, and other professional or academic text.' },
@@ -199,7 +199,7 @@ const FEATURES = [
 // ── STEPS — how-it-works numbered step cards ─────────────────────────────────
 const STEPS = [
   { n: '01', title: 'Paste your text',   body: 'Drop in any content — essays, job ads, emails, reports, or policy drafts.' },
-  { n: '02', title: 'Run the check',     body: 'GENTEK looks for gendered terms, role assumptions, and stereotype language.' },
+  { n: '02', title: 'Run the check',     body: 'GENTEK looks for gendered terms and role assumptions in your writing.' },
   { n: '03', title: 'Review highlights', body: 'Flagged words are color-coded with a clear explanation for each finding.' },
   { n: '04', title: 'Revise with clarity', body: 'Use the suggested alternatives to make your writing more inclusive.' },
 ]

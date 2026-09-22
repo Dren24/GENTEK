@@ -36,7 +36,7 @@ export default function AboutPage() {
               </div>
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Our Mission</h2>
               <p className="text-gray-500 dark:text-gray-400 leading-relaxed">
-                To build an accessible, AI-driven tool that empowers students, professionals, writers, and organizations to identify and eliminate gender-biased language from their written communication. Inclusive language promotes equality, reduces stereotypes, and creates a fairer world.
+                To build an accessible, AI-driven tool that empowers students, professionals, writers, and organizations to identify and eliminate gender-biased language from their written communication. Inclusive language promotes equality and creates a fairer world.
               </p>
             </div>
             {/* Vision card — Eye icon */}
