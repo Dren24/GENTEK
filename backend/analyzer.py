@@ -338,7 +338,12 @@ def _llm_analyze_chunk(text: str) -> Optional[List[Dict]]:
                         d = {**d, "_ctx_gender": ctx_gender}
                 clean.append(d)
         return clean
-    except Exception:
+    except Exception as e:
+        # Silently returning None here used to make LLM failures indistinguishable
+        # from "found nothing" — log the actual cause (bad/expired key, rate limit,
+        # network error, unexpected response shape) so it shows up in server logs
+        # instead of only being diagnosable by comparing prod vs. local behavior.
+        print(f"[analyzer] LLM chunk request failed: {type(e).__name__}: {e}")
         return None
 
 
@@ -352,6 +357,7 @@ def _llm_analyze(text: str) -> Optional[List[Dict]]:
     still tell "LLM unavailable" apart from "LLM ran and found nothing".
     """
     if not HF_API_KEY:
+        print("[analyzer] WARNING: HF_API_KEY not set — falling back to rule-based detection only (no contextual/LLM coverage).")
         return None
 
     chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)[:LLM_MAX_CHUNKS]
