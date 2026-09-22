@@ -544,14 +544,20 @@ export default function HomePage() {
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       const r = normalizeApiResult(data, inputText)
-      setResults(r)
+      // Zero detections: reset to the plain pre-analysis state instead of
+      // leaving an "Analyzed — no bias" status up — same behavior as after
+      // Rewrite Text. The result is still saved to history either way.
+      setResults(r.detected.length === 0 ? null : r)
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
       succeeded = true
     } catch {
       const r = runAnalysis(inputText)
-      setResults(r)
+      // Zero detections: reset to the plain pre-analysis state instead of
+      // leaving an "Analyzed — no bias" status up — same behavior as after
+      // Rewrite Text. The result is still saved to history either way.
+      setResults(r.detected.length === 0 ? null : r)
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
