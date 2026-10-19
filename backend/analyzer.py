@@ -170,10 +170,12 @@ _PATTERN_WORDS = {p["word"].lower() for p in BIAS_PATTERNS}
 # These are ordinary English words/adjectives with plenty of non-gendered uses
 # ("the aggressive dog", "nurturing the garden", "a bossy toddler"). Flagging
 # them on a bare word match — regardless of what they're describing — produces
-# false positives. They're only kept as candidates when a person/gender word
-# appears nearby, so the sentence is actually about a person. Explicit gendered
-# nouns, job titles, and full gendered statements ("men are better", etc.) are
-# unambiguous on their own and don't need this check.
+# false positives. They're only kept when a gendered word (she, men, girl...)
+# appears nearby, so the sentence is actually about someone's gender — a
+# coded word describing someone whose gender isn't stated ("the leader was
+# bossy") is not flagged, since attributing a gender to it would be a guess.
+# Explicit gendered nouns, job titles, and full gendered statements ("men are
+# better", etc.) are unambiguous on their own and don't need this check.
 _CONTEXT_DEPENDENT_WORDS = {
     "overly emotional", "bossy", "hysterical", "aggressive",
     "less emotional", "more emotional", "nurturing",
@@ -186,39 +188,27 @@ _FEMALE_CONTEXT_WORDS = {
 _MALE_CONTEXT_WORDS = {
     "he", "him", "his", "himself", "man", "men", "boy", "boys", "male", "males", "gentleman", "gentlemen",
 }
-_PERSON_CONTEXT_WORDS = _FEMALE_CONTEXT_WORDS | _MALE_CONTEXT_WORDS | {
-    "they", "them", "their", "theirs", "themselves",
-    "employee", "employees", "worker", "workers", "candidate", "candidates", "colleague", "colleagues",
-    "manager", "leader", "leaders", "staff", "person", "people", "someone", "individual",
-    "boss", "director", "president", "executive", "ceo", "chairman", "chairperson",
-}
-
-_CONTEXT_WINDOW = 60  # chars scanned on each side of a match for a person/gender reference
-
-
-def _has_person_context(text: str, start: int, end: int) -> bool:
-    """True if a person/gender-referring word appears within _CONTEXT_WINDOW
-    characters of the match, i.e. the sentence is actually describing a
-    person — not an unrelated use of the same word."""
-    window = text[max(0, start - _CONTEXT_WINDOW): end + _CONTEXT_WINDOW].lower()
-    return any(re.search(r'\b' + w + r'\b', window) for w in _PERSON_CONTEXT_WORDS)
+_CONTEXT_WINDOW = 60  # chars scanned on each side of a match for a gender reference
+_GENDER_WORD_RX = re.compile(
+    r'\b(' + '|'.join(sorted(_FEMALE_CONTEXT_WORDS | _MALE_CONTEXT_WORDS)) + r')\b', re.IGNORECASE)
 
 
 def _context_gender(text: str, start: int, end: int) -> Optional[str]:
-    """Returns 'female' or 'male' based on the nearest gendered pronoun/noun
-    around a match, or None if the context doesn't clearly lean either way
-    (e.g. the subject is 'they', 'the employee', or ungendered). Used to
-    attribute a direction to stereotype-type findings ('aggressive', 'bossy')
-    that carry no gender of their own — their bias direction comes entirely
-    from who the sentence is describing."""
-    window = text[max(0, start - _CONTEXT_WINDOW): end + _CONTEXT_WINDOW].lower()
-    is_female = any(re.search(r'\b' + w + r'\b', window) for w in _FEMALE_CONTEXT_WORDS)
-    is_male   = any(re.search(r'\b' + w + r'\b', window) for w in _MALE_CONTEXT_WORDS)
-    if is_female and not is_male:
-        return "female"
-    if is_male and not is_female:
-        return "male"
-    return None  # both, or neither, present — genuinely ambiguous
+    """'female' or 'male' from the gendered word (she, men, girl, ...) nearest
+    to the match within _CONTEXT_WINDOW characters, or None if there is none —
+    the subject is ungendered ('the leader', 'they', 'the employee').
+    Stereotype-type words ('aggressive', 'bossy') carry no gender of their
+    own; their direction comes entirely from who the sentence describes, and
+    the nearest gendered word is the best local signal when both appear
+    ("he said she was bossy")."""
+    lo = max(0, start - _CONTEXT_WINDOW)
+    best, best_dist = None, None
+    for m in _GENDER_WORD_RX.finditer(text, lo, end + _CONTEXT_WINDOW):
+        dist = start - m.end() if m.end() <= start else max(0, m.start() - end)
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best = "female" if m.group(1).lower() in _FEMALE_CONTEXT_WORDS else "male"
+    return best
 
 
 def _effective_gender(d: Dict) -> Optional[str]:
@@ -231,9 +221,9 @@ def _effective_gender(d: Dict) -> Optional[str]:
 
 def _pattern_detect(text: str) -> List[Dict]:
     """Returns known biased patterns found in text. Context-dependent stereotype
-    words (see _CONTEXT_DEPENDENT_WORDS) are only counted when a person/gender
-    word appears nearby, so common non-gendered uses aren't flagged just
-    because the word itself is in the lexicon."""
+    words (see _CONTEXT_DEPENDENT_WORDS) are only counted when a gendered word
+    appears nearby, so non-gendered uses aren't flagged just because the word
+    itself is in the lexicon."""
     lower = text.lower()
     found = []
     for p in BIAS_PATTERNS:
@@ -242,7 +232,8 @@ def _pattern_detect(text: str) -> List[Dict]:
         if not match:
             continue
         if w in _CONTEXT_DEPENDENT_WORDS:
-            if not _has_person_context(text, match.start(), match.end()):
+            gender = _context_gender(text, match.start(), match.end())
+            if gender is None:
                 continue
             # "nurturing" is often a verb with a direct object ("nurturing the
             # garden", "nurturing her plants") rather than a personality trait
@@ -255,9 +246,8 @@ def _pattern_detect(text: str) -> List[Dict]:
                 continue
             if p["type"] == "stereotype":
                 # Stereotype is a source-list grouping, not an output category —
-                # resolve directly to whichever gender the stereotype targets in
-                # context, same tie-break as _score() when direction is ambiguous.
-                p = {**p, "type": _context_gender(text, match.start(), match.end()) or "male"}
+                # resolve directly to whichever gender the stereotype targets in context.
+                p = {**p, "type": gender}
         found.append(p)
     return found
 
@@ -335,7 +325,16 @@ _SYSTEM_PROMPT = (
     "ability, or role, or a person judged against gender norms ('Girls aren't good at math', "
     "'Real men don't cry', 'she's too emotional to lead', 'that's a man's job'), including "
     "assigning tasks or roles to people because of their gender, even implicitly (picking the "
-    "women for clerical, serving, or caring chores; the men for heavy or leadership work).\n"
+    "women for clerical, serving, or caring chores; the men for heavy or leadership work). This "
+    "also covers IMPLICIT gender-role framing, common in songs and stories, when the text clearly "
+    "casts one gender as the active pursuer, owner, or winner and the other as a passive prize, "
+    "possession, or reward ('win her like a trophy', 'claim your girl', 'she's his reward'), or "
+    "has a woman exist only to comfort, fix, or serve a man. For that framing, type is the gender "
+    "cast as the prize or possession. Ordinary affection, longing, missing someone, or simply "
+    "being together is NOT this — only flag a clear pursue/possess/reward framing. A "
+    "gender-coded trait word (bossy, nurturing, emotional, aggressive, hysterical) is NOT a "
+    "stereotype when the text never states or implies anyone's gender ('the leader was bossy', "
+    "'a nurturing personality for the role') — attributing a gender there would be a guess.\n"
     "- discrimination: excluding, ranking, or demeaning people because of their gender "
     "('we won't hire women who might have kids', 'no girls allowed on the team').\n\n"
     "Fields for each finding:\n"
@@ -501,7 +500,7 @@ def _validate_llm_items(items: list, text: str) -> tuple:
         if item_type == "stereotype":
             # Defensive: resolve the retired label the same way pattern
             # stereotypes are, rather than dropping the finding.
-            item_type = _context_gender(text, match.start(), match.end()) or "male"
+            item_type = _context_gender(text, match.start(), match.end()) or ""
         if item_type not in VALID_TYPES:
             dropped.append((span, f"invalid type {item_type!r}"))
             continue

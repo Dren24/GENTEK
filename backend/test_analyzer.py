@@ -247,6 +247,24 @@ class LLMLayerTests(unittest.TestCase):
         self.assertEqual(messages[1]["content"], f"<text>\n{text}\n</text>")
 
 
+class CodedWordContextTests(unittest.TestCase):
+    """Lexicon-only: gender-coded words count only when a gender is stated nearby."""
+
+    def words(self, text):
+        return [(d["word"], d["type"]) for d in analyzer._pattern_detect(text)]
+
+    def test_no_gender_stated_is_not_flagged(self):
+        self.assertEqual(self.words("The report called the leader bossy."), [])
+        self.assertEqual(self.words("The employee was described as overly emotional."), [])
+
+    def test_gender_stated_sets_direction(self):
+        self.assertEqual(self.words("She was called bossy in the meeting."), [("bossy", "female")])
+        self.assertEqual(self.words("He was too aggressive with the team."), [("aggressive", "male")])
+
+    def test_nearest_gendered_word_wins(self):
+        self.assertEqual(self.words("He said she was bossy."), [("bossy", "female")])
+
+
 class ProviderConfigTests(unittest.TestCase):
     """Provider is chosen at import time from env vars; reload under a fixed env."""
 

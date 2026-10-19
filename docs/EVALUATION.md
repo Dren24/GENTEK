@@ -10,7 +10,7 @@ against expected labels and expected detected terms.
 - Size: 80 English sentences.
 - Training samples: 0. The system was not trained on these cases.
 - Purpose: testing only.
-- Labels: `MALE-BIASED`, `FEMALE-BIASED`, `MIXED-BIAS`, and `GENDER-NEUTRAL`.
+- Labels: `MALE-BIASED`, `FEMALE-BIASED`, and `GENDER-NEUTRAL` (`MIXED-BIAS` is retired).
 - Test file: `docs/gentek_evaluation_cases.csv`.
 
 ## Method
