@@ -625,17 +625,30 @@ def _llm_analyze(text: str) -> tuple:
 def _merge(patterns: List[Dict], llm_items: List[Dict]) -> List[Dict]:
     """
     Combines pattern matches (always trusted) with LLM findings.
-    LLM items are added only if not already covered by a pattern match.
+    LLM items are added only if not already covered by a pattern match —
+    including a longer/shorter phrase around the same match ("women are
+    naturally better at client care" vs the pattern "women are naturally
+    better"), which is the same bias and would otherwise be counted twice.
     Filters out any LLM item whose word is in the neutral-terms whitelist.
     """
-    seen = {p["word"].lower() for p in patterns}
+    def norm(w: str) -> str:
+        return " ".join(w.lower().split())
+
+    def contains(outer: str, inner: str) -> bool:
+        return re.search(r'(?<!\w)' + re.escape(inner) + r'(?!\w)', outer) is not None
+
+    pattern_words = [norm(p["word"]) for p in patterns]
+    seen = set(pattern_words)
     merged = list(patterns)
     for d in llm_items:
-        w = d.get("word", "").lower()
+        w = norm(d.get("word", ""))
         # Skip if already caught by pattern, or if it's a known neutral term
-        if w not in seen and w not in NEUTRAL_TERMS and w not in _PATTERN_WORDS:
-            seen.add(w)
-            merged.append(d)
+        if w in seen or w in NEUTRAL_TERMS or w in _PATTERN_WORDS:
+            continue
+        if any(contains(w, pw) or contains(pw, w) for pw in pattern_words):
+            continue
+        seen.add(w)
+        merged.append(d)
     return merged
 
 

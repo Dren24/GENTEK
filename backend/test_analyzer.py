@@ -148,6 +148,13 @@ class LLMLayerTests(unittest.TestCase):
             _item("his", "male", "generic_pronoun", "their", "r", "every member")]}))
         self.assertEqual(sorted(d["word"] for d in result["detected"]), ["chairman", "his"])
 
+    def test_llm_phrase_overlapping_a_lexicon_match_is_not_double_counted(self):
+        text = "Women are naturally better at client care."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("Women are naturally better at client care", "female", "stereotype", "x", "r")]}))
+        self.assertEqual([d["word"] for d in result["detected"]], ["women are naturally better"])
+        self.assertEqual(result["score"], 20)
+
     # ── Exact spans for generic pronouns ──────────────────────────────────────
     def test_generic_pronoun_spans_skip_specific_uses_of_same_word(self):
         text = "Every pilot checks his gear. Tom lost his keys."
