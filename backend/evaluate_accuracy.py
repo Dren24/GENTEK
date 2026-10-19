@@ -31,18 +31,19 @@ def load_cases(path: Path) -> list[dict[str, str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the GENTEK accuracy evaluation set.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="CSV file of evaluation cases")
-    parser.add_argument("--use-llm", action="store_true", help="Include HuggingFace LLM calls if HF_API_KEY is configured")
+    parser.add_argument("--use-llm", action="store_true", help="Include LLM calls if the configured provider's API key is set")
     parser.add_argument("--show-errors", action="store_true", help="Print every failed case")
     args = parser.parse_args()
 
     if not args.use_llm:
         os.environ["HF_API_KEY"] = ""
+        os.environ["GROQ_API_KEY"] = ""
 
     sys.path.insert(0, str(ROOT / "backend"))
     import analyzer  # noqa: PLC0415
 
     if not args.use_llm:
-        analyzer.HF_API_KEY = ""
+        analyzer.LLM_API_KEY = ""
 
     cases = load_cases(args.cases)
     label_correct = 0
@@ -85,7 +86,7 @@ def main() -> int:
 
     print("GENTEK Manual Evaluation")
     print(f"Cases: {total}")
-    print(f"LLM enabled: {'yes' if args.use_llm else 'no'}")
+    print(f"LLM enabled: {f'yes ({analyzer.LLM_PROVIDER}, {analyzer.LLM_MODEL})' if args.use_llm else 'no'}")
     print(f"Label accuracy: {label_correct}/{total} = {label_accuracy:.2%}")
     print(f"Exact detected-term accuracy: {exact_terms_correct}/{total} = {exact_detection_accuracy:.2%}")
     print(f"Detected-term precision: {precision:.2%}")

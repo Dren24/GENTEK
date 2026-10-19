@@ -9,13 +9,45 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# .strip() guards against a trailing newline/whitespace sneaking into the env
-# var value (e.g. from a copy-paste into a hosting platform's dashboard) —
-# that alone is enough to make `requests` reject the Authorization header
-# outright, silently degrading every analysis to rule-based-only detection.
-HF_API_KEY = os.getenv("HF_API_KEY", "").strip()
-LLM_MODEL  = "meta-llama/Llama-3.1-8B-Instruct"
-CHAT_URL   = "https://router.huggingface.co/v1/chat/completions"
+# ── LLM provider ──────────────────────────────────────────────────────────────
+# The same Llama 3.1 8B Instruct model is served by several OpenAI-compatible
+# hosts; only the endpoint, model id, and key differ. LLM_PROVIDER picks one
+# ("groq" or "huggingface"); when unset, Groq is used if GROQ_API_KEY is
+# configured, else Hugging Face. LLM_MODEL / LLM_API_URL override the preset
+# (e.g. if a host renames its model id) without a code change.
+_PROVIDERS = {
+    "huggingface": {
+        "url":     "https://router.huggingface.co/v1/chat/completions",
+        "model":   "meta-llama/Llama-3.1-8B-Instruct",
+        "key_env": "HF_API_KEY",
+    },
+    "groq": {
+        "url":     "https://api.groq.com/openai/v1/chat/completions",
+        "model":   "llama-3.1-8b-instant",
+        "key_env": "GROQ_API_KEY",
+    },
+}
+
+
+def _env(name: str) -> str:
+    # .strip() guards against a trailing newline/whitespace sneaking into the env
+    # var value (e.g. from a copy-paste into a hosting platform's dashboard) —
+    # that alone is enough to make `requests` reject the Authorization header
+    # outright, silently degrading every analysis to rule-based-only detection.
+    return os.getenv(name, "").strip()
+
+
+LLM_PROVIDER = _env("LLM_PROVIDER").lower() or ("groq" if _env("GROQ_API_KEY") else "huggingface")
+if LLM_PROVIDER not in _PROVIDERS:
+    print(f"[analyzer] WARNING: unknown LLM_PROVIDER {LLM_PROVIDER!r} — using huggingface", flush=True)
+    LLM_PROVIDER = "huggingface"
+_preset      = _PROVIDERS[LLM_PROVIDER]
+LLM_KEY_ENV  = _preset["key_env"]
+LLM_API_KEY  = _env(LLM_KEY_ENV)
+LLM_MODEL    = _env("LLM_MODEL") or _preset["model"]
+CHAT_URL     = _env("LLM_API_URL") or _preset["url"]
+print(f"[analyzer] LLM provider: {LLM_PROVIDER} ({LLM_MODEL}), key {LLM_KEY_ENV} "
+      f"{'set' if LLM_API_KEY else 'NOT set'}", flush=True)
 
 # ── LLM chunking config ────────────────────────────────────────────────────────
 # Llama 3.1 8B's context window is large, but we deliberately keep each request
@@ -44,6 +76,10 @@ LLM_MAX_ATTEMPTS   = 2      # one retry for transient failures / unparseable out
 # Statuses where retrying can't help (bad key, no credits, bad request) — fail
 # fast and surface the reason instead of spending a second request.
 _NON_RETRYABLE_STATUS = {400, 401, 402, 403, 404, 422}
+# Longest Retry-After (seconds) worth waiting on a 429 before retrying. Free
+# tiers (e.g. Groq) rate-limit per minute; a longer wait would stall the
+# request, so beyond this the chunk falls back to rule-based detection.
+LLM_MAX_RETRY_AFTER = 8
 
 # Categories the model must assign each finding. A finding has to say *what
 # kind* of bias it is, not just that a gendered word is present.
@@ -475,7 +511,7 @@ def _call_llm(text: str) -> str:
     try:
         resp = requests.post(
             CHAT_URL,
-            headers={"Authorization": f"Bearer {HF_API_KEY}"},
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
             json={
                 "model": LLM_MODEL,
                 "messages": [
@@ -494,6 +530,14 @@ def _call_llm(text: str) -> str:
         # rate limit) instead of a bare KeyError from an error body.
         err = _LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
         err.retryable = resp.status_code not in _NON_RETRYABLE_STATUS
+        if resp.status_code == 429:
+            try:
+                wait = float(resp.headers.get("retry-after", ""))
+            except ValueError:
+                wait = None
+            if wait is not None:
+                err.retry_after = wait
+                err.retryable = wait <= LLM_MAX_RETRY_AFTER
         raise err
     try:
         return resp.json()["choices"][0]["message"]["content"] or ""
@@ -503,7 +547,7 @@ def _call_llm(text: str) -> str:
 
 def _llm_analyze_chunk(text: str) -> tuple:
     """
-    Asks Llama 3.1 for contextual bias in one chunk.
+    Asks Llama 3.1 (via the configured provider) for contextual bias in one chunk.
     Returns (items, error): items is a list of validated detections ([] means
     the model read the text and found no bias) or None if the chunk could not be
     analyzed, in which case error explains why.
@@ -515,9 +559,9 @@ def _llm_analyze_chunk(text: str) -> tuple:
         except _LLMError as e:
             last_error = str(e)
             _log(f"LLM request failed (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {last_error}")
-            if not getattr(e, "retryable", True):
+            if not getattr(e, "retryable", True) or attempt == LLM_MAX_ATTEMPTS:
                 break
-            time.sleep(1.0 * attempt)
+            time.sleep(getattr(e, "retry_after", None) or 1.0 * attempt)
             continue
 
         items = _parse_llm_json(raw)
@@ -543,9 +587,9 @@ def _llm_analyze(text: str) -> tuple:
         "LLM unavailable" apart from "LLM ran and found nothing";
       - error is a short cause string whenever any chunk failed, else None.
     """
-    if not HF_API_KEY:
-        _log("WARNING: HF_API_KEY not set — falling back to rule-based detection only (no contextual/LLM coverage).")
-        return None, "HF_API_KEY not set"
+    if not LLM_API_KEY:
+        _log(f"WARNING: {LLM_KEY_ENV} not set — falling back to rule-based detection only (no contextual/LLM coverage).")
+        return None, f"{LLM_KEY_ENV} not set"
 
     chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)[:LLM_MAX_CHUNKS]
 
