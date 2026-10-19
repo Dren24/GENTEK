@@ -10,11 +10,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── LLM provider ──────────────────────────────────────────────────────────────
-# The same Llama 3.1 8B Instruct model is served by several OpenAI-compatible
-# hosts; only the endpoint, model id, and key differ. LLM_PROVIDER picks one
-# ("groq" or "huggingface"); when unset, Groq is used if GROQ_API_KEY is
-# configured, else Hugging Face. LLM_MODEL / LLM_API_URL override the preset
-# (e.g. if a host renames its model id) without a code change.
+# Both hosts speak the same OpenAI-compatible chat API; only the endpoint, model
+# id, and key differ. LLM_PROVIDER picks one ("groq" or "huggingface"); when
+# unset, Groq is used if GROQ_API_KEY is configured, else Hugging Face.
+# LLM_MODEL / LLM_API_URL override the preset without a code change.
+#
+# Hugging Face serves GENTEK's documented model, Llama 3.1 8B Instruct. Groq no
+# longer hosts Llama 3.1, so its preset is a temporary free-tier stand-in
+# (gpt-oss-20b) for when the Hugging Face credits are exhausted — it returns
+# the same JSON format, but evaluation results should come from Llama.
 _PROVIDERS = {
     "huggingface": {
         "url":     "https://router.huggingface.co/v1/chat/completions",
@@ -23,7 +27,7 @@ _PROVIDERS = {
     },
     "groq": {
         "url":     "https://api.groq.com/openai/v1/chat/completions",
-        "model":   "llama-3.1-8b-instant",
+        "model":   "openai/gpt-oss-20b",
         "key_env": "GROQ_API_KEY",
     },
 }

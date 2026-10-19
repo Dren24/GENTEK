@@ -208,10 +208,10 @@ class ProviderConfigTests(unittest.TestCase):
     def tearDown(self):
         importlib.reload(analyzer)
 
-    def test_groq_key_selects_groq_llama(self):
+    def test_groq_key_selects_groq(self):
         a = self.load(GROQ_API_KEY="g", HF_API_KEY="h")
         self.assertEqual(a.LLM_PROVIDER, "groq")
-        self.assertEqual(a.LLM_MODEL, "llama-3.1-8b-instant")
+        self.assertEqual(a.LLM_MODEL, "openai/gpt-oss-20b")
         self.assertIn("api.groq.com", a.CHAT_URL)
         self.assertEqual(a.LLM_API_KEY, "g")
 

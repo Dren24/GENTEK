@@ -39,7 +39,7 @@ To show any failing cases:
 python3 backend/evaluate_accuracy.py --show-errors
 ```
 
-To include Llama 3.1 LLM calls when `GROQ_API_KEY` (Groq) or `HF_API_KEY` (Hugging Face) is configured:
+To include LLM calls when `HF_API_KEY` (Llama 3.1 8B on Hugging Face) or `GROQ_API_KEY` (temporary gpt-oss-20b stand-in on Groq) is configured:
 
 ```bash
 python3 backend/evaluate_accuracy.py --use-llm --show-errors
