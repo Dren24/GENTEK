@@ -222,16 +222,19 @@ function WordPopup({ word, suggestion, reason, type, x, y, onApply, onClose }) {
       {/* Detected term + reason */}
       <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">{word}</p>
       <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed mb-3">{reason}</p>
-      {/* Suggested alternative — click the word itself to apply it */}
-      <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Suggested</p>
-        <button
-          onClick={() => { onApply(word, suggestion); onClose() }}
-          className="block w-full text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline text-left whitespace-normal break-words"
-        >
-          {suggestion}
-        </button>
-      </div>
+      {/* Suggested alternative — click the word itself to apply it. Some AI
+          findings come without one; then there's nothing to apply. */}
+      {suggestion && (
+        <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Suggested</p>
+          <button
+            onClick={() => { onApply(word, suggestion); onClose() }}
+            className="block w-full text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline text-left whitespace-normal break-words"
+          >
+            {suggestion}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -251,10 +254,11 @@ export default function HomePage() {
   const [canForward, setCanForward] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)  // login popup on 2nd guest analysis
-  // Text whose last analysis ran without the AI model (keyword list only) and
-  // found nothing — results are cleared then, so this keeps the notice visible
-  // until the text changes. Non-empty results carry ai_powered themselves.
-  const [rulesOnlyText, setRulesOnlyText] = useState(null)
+  // Last analysis that found no bias: { text, ai_powered }. Zero-detection
+  // results aren't shown in the read-only results view (there'd be nothing to
+  // rewrite and no way back to editing), so this drives a "Gender-Neutral"
+  // status next to the still-editable text until the text changes.
+  const [cleanResult, setCleanResult] = useState(null)
   const textareaRef              = useRef(null)
   const overlayRef               = useRef(null)        // mirrors textarea scroll for the Free-limit fade overlay
   const fileInputRef             = useRef(null)
@@ -455,11 +459,22 @@ export default function HomePage() {
     ? splitAtWordLimit(text, FREE_WORD_LIMIT)
     : { head: text, tail: '' }
 
-  // ── rulesOnly — the shown analysis didn't get contextual AI review (model
-  // unavailable or API unreachable), so a clean result isn't a full check ──
-  const rulesOnly = results
-    ? results.ai_powered === false
-    : rulesOnlyText !== null && (rulesOnlyText === text || rulesOnlyText === analyzableText)
+  // ── shownClean — the no-bias result for exactly the text in the editor ───
+  const shownClean = !results && !analyzing && cleanResult !== null &&
+    (cleanResult.text === text || cleanResult.text === analyzableText)
+    ? cleanResult : null
+
+  // ── aiCoverage — how much of the shown analysis got contextual AI review:
+  //   'full'    — the AI read the whole text
+  //   'partial' — the AI ran but skipped parts (rate limit, error, or over its
+  //               length limit), so bias in those parts may be missed
+  //   'none'    — keyword list only (model unavailable or API unreachable)
+  //   null      — nothing analyzed for the current text
+  const shownAnalysis = results || shownClean
+  const aiCoverage = !shownAnalysis ? null
+    : shownAnalysis.ai_powered === false ? 'none'
+    : shownAnalysis.ai_partial ? 'partial'
+    : shownAnalysis.ai_powered ? 'full' : null
 
   // ── normalizeApiResult — coerces API response into a consistent result shape ──
   // Fills in derived fields (label, color, html) if the backend didn't return them.
@@ -507,7 +522,7 @@ export default function HomePage() {
       return
     }
 
-    setAna(true); setResults(null); setRulesOnlyText(null)
+    setAna(true); setResults(null); setCleanResult(null)
     let succeeded = false
     try {
       const res = await fetch('/analyze', {
@@ -523,7 +538,7 @@ export default function HomePage() {
       // leaving an "Analyzed — no bias" status up — same behavior as after
       // Rewrite Text. The result is still saved to history either way.
       setResults(r.detected.length === 0 ? null : r)
-      if (r.ai_powered === false) setRulesOnlyText(inputText)
+      if (r.detected.length === 0) setCleanResult({ text: inputText, ai_powered: r.ai_powered !== false, ai_partial: !!r.ai_partial })
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
@@ -534,7 +549,7 @@ export default function HomePage() {
       // leaving an "Analyzed — no bias" status up — same behavior as after
       // Rewrite Text. The result is still saved to history either way.
       setResults(r.detected.length === 0 ? null : r)
-      setRulesOnlyText(inputText)
+      if (r.detected.length === 0) setCleanResult({ text: inputText, ai_powered: false, ai_partial: false })
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
@@ -724,17 +739,20 @@ export default function HomePage() {
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/60">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Input Text</span>
-                  {results?.ai_powered && (
+                  {aiCoverage === 'full' && (
                     <span className="flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 px-2 py-0.5 rounded-full">
                       <Sparkle size={9} weight="fill" />AI
                     </span>
                   )}
-                  {rulesOnly && (
+                  {(aiCoverage === 'none' || aiCoverage === 'partial') && (
                     <span
-                      title="The AI model couldn't be reached, so only GENTEK's built-in keyword list was checked. Contextual bias may have been missed — try again later."
+                      title={aiCoverage === 'none'
+                        ? "The AI model couldn't be reached, so only GENTEK's built-in keyword list was checked. Contextual bias may have been missed — try again later."
+                        : "The AI couldn't review every part of this text (it was busy or the text is very long), so bias in those parts may have been missed — try again in a minute."}
                       className="flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 px-2 py-0.5 rounded-full"
                     >
-                      <WarningCircle size={10} weight="fill" />Keyword check only
+                      <WarningCircle size={10} weight="fill" />
+                      {aiCoverage === 'none' ? 'Keyword check only' : 'AI partially checked'}
                     </span>
                   )}
                 </div>
@@ -914,6 +932,19 @@ export default function HomePage() {
                 <div className="flex items-center gap-2">
                   {!results ? (
                     <>
+                      {/* No-bias result for the current text — the editor stays editable */}
+                      {shownClean && (aiCoverage === 'full' ? (
+                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 dark:text-brand-400 mr-1 whitespace-nowrap">
+                          <CheckCircle size={16} weight="fill" />
+                          Gender-Neutral<span className="hidden sm:inline">&nbsp;— no gender bias found</span>
+                        </span>
+                      ) : (
+                        /* Nothing found, but the AI didn't read all of it — don't claim neutral */
+                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700 dark:text-amber-400 mr-1 whitespace-nowrap">
+                          <WarningCircle size={16} weight="fill" />
+                          Not fully checked<span className="hidden sm:inline">&nbsp;— try again shortly</span>
+                        </span>
+                      ))}
                       {/* Try Sample — guests only, loads male-biased sample */}
                       {!user && (
                         <button

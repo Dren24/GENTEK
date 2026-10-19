@@ -29,6 +29,10 @@ _PROVIDERS = {
         "url":     "https://api.groq.com/openai/v1/chat/completions",
         "model":   "openai/gpt-oss-20b",
         "key_env": "GROQ_API_KEY",
+        # gpt-oss is a reasoning model; at its default effort it can spend the
+        # whole token budget reasoning and return an empty answer (observed on
+        # poems and Taglish text). Low effort answers reliably in ~150-350 tokens.
+        "params":  {"reasoning_effort": "low"},
     },
 }
 
@@ -46,6 +50,7 @@ if LLM_PROVIDER not in _PROVIDERS:
     print(f"[analyzer] WARNING: unknown LLM_PROVIDER {LLM_PROVIDER!r} — using huggingface", flush=True)
     LLM_PROVIDER = "huggingface"
 _preset      = _PROVIDERS[LLM_PROVIDER]
+LLM_PARAMS   = _preset.get("params", {})
 LLM_KEY_ENV  = _preset["key_env"]
 LLM_API_KEY  = _env(LLM_KEY_ENV)
 LLM_MODEL    = _env("LLM_MODEL") or _preset["model"]
@@ -81,9 +86,9 @@ LLM_MAX_ATTEMPTS   = 2      # one retry for transient failures / unparseable out
 # fast and surface the reason instead of spending a second request.
 _NON_RETRYABLE_STATUS = {400, 401, 402, 403, 404, 422}
 # Longest Retry-After (seconds) worth waiting on a 429 before retrying. Free
-# tiers (e.g. Groq) rate-limit per minute; a longer wait would stall the
-# request, so beyond this the chunk falls back to rule-based detection.
-LLM_MAX_RETRY_AFTER = 8
+# tiers (e.g. Groq) rate-limit per minute and typically ask for 5-15s; beyond
+# this the chunk is reported as not reviewed rather than stalling the request.
+LLM_MAX_RETRY_AFTER = 20
 
 # Categories the model must assign each finding. A finding has to say *what
 # kind* of bias it is, not just that a gendered word is present.
@@ -313,19 +318,24 @@ _SYSTEM_PROMPT = (
     "for what it MEANS in context, the way a careful human editor would, not by keywords.\n\n"
     "The key distinction: MENTIONING GENDER IS NOT BIAS. Pronouns and gendered words that refer "
     "to a particular person or character — named or not — are ordinary references: 'her' in a "
-    "love song, 'he' in a story, 'my sister', 'his mother', 'the girl next door'. Most texts "
+    "love song, 'he' in a story, 'my sister', 'his mother', 'the girl next door'. This holds in "
+    "every language: kinship terms and honorifics for particular people (Filipino 'Ate', 'Kuya', "
+    "'Tita'; 'Mr.', 'Mrs.', 'Señora') are references, not bias. Most texts "
     "contain no gender bias at all, and an empty list is the normal, correct answer for them. "
     "Never invent a finding to have something to report.\n\n"
     "Report a span ONLY if it fits one of these categories:\n"
-    "- gendered_term: a role/occupational title or term that excludes a gender where a common "
-    "neutral form exists (chairman, fireman, stewardess, mankind, manpower).\n"
+    "- gendered_term: an occupational/role title, or a term for people in general, that excludes "
+    "a gender where a common neutral form exists (chairman, fireman, stewardess, mankind, "
+    "manpower). Never a kinship term, honorific, or word naming a particular person.\n"
     "- generic_pronoun: he/his/him (or she/her) used for a hypothetical or generic person whose "
     "gender is unknown, where the pronoun's antecedent is a generic role or indefinite person "
     "written in the text ('Each engineer should check his code', 'A nurse must update her "
     "charts', 'If a user forgets his password').\n"
     "- stereotype: a claim or assumption that a gender has, lacks, or should have a trait, "
     "ability, or role, or a person judged against gender norms ('Girls aren't good at math', "
-    "'Real men don't cry', 'she's too emotional to lead', 'that's a man's job').\n"
+    "'Real men don't cry', 'she's too emotional to lead', 'that's a man's job'), including "
+    "assigning tasks or roles to people because of their gender, even implicitly (picking the "
+    "women for clerical, serving, or caring chores; the men for heavy or leadership work).\n"
     "- discrimination: excluding, ranking, or demeaning people because of their gender "
     "('we won't hire women who might have kids', 'no girls allowed on the team').\n\n"
     "Fields for each finding:\n"
@@ -379,6 +389,35 @@ def _find_span(phrase: str, text: str) -> Optional[re.Match]:
     Returns the match so the caller can use the text's own spelling of the span."""
     rx = _span_pattern(phrase)
     return rx.search(text) if rx else None
+
+
+# Between consecutive quoted words: optional punctuation, then at most two
+# words the model left out of its quote.
+_LOOSE_GAP = r'[^\w\s]*(?:\s+\S+){0,2}?\s+[^\w\s]*'
+
+
+def _find_span_loose(phrase: str, text: str) -> Optional[re.Match]:
+    """Fallback for a slightly misquoted phrase — the model dropped a filler
+    word or punctuation (e.g. quoting 'Babae ka, dapat' from 'Babae ka kasi,
+    dapat'). Every quoted word must still appear, in order, with at most two
+    extra words between neighbours; needs 3+ words so short quotes can't
+    match by accident. The returned match is the text's own span."""
+    words = [re.sub(r'^[^\w]+|[^\w]+$', '', t) for t in phrase.split()]
+    words = [w for w in words if w]
+    if len(words) < 3:
+        return None
+    pattern = _LOOSE_GAP.join(re.escape(w) for w in words)
+    return re.search(r'(?<!\w)' + pattern + r'(?!\w)', text, re.IGNORECASE)
+
+
+# Used when the model flags real bias but leaves the reason empty — the
+# finding is kept rather than discarded over a missing explanation.
+_FALLBACK_REASONS = {
+    "gendered_term":   "Gendered term where a neutral alternative exists.",
+    "generic_pronoun": "Assumes the gender of an unspecified person.",
+    "stereotype":      "Relies on a gender stereotype or gender-role assumption.",
+    "discrimination":  "Treats people differently because of their gender.",
+}
 
 
 _CLAUSE_END = re.compile(r'[.!?;\n]')
@@ -453,7 +492,7 @@ def _validate_llm_items(items: list, text: str) -> tuple:
         category = str(d.get("category") or "").strip().lower()
         item_type = str(d.get("type") or "").strip().lower()
 
-        match = _find_span(w, text) if w else None
+        match = (_find_span(w, text) or _find_span_loose(w, text)) if w else None
         if not match:
             dropped.append((w, "span not found in text"))
             continue
@@ -469,9 +508,13 @@ def _validate_llm_items(items: list, text: str) -> tuple:
         if category not in LLM_CATEGORIES:
             dropped.append((span, f"invalid category {category!r}"))
             continue
-        if not s or not reason or s.lower() == span_lower:
-            dropped.append((span, "missing/identical suggestion or missing reason"))
-            continue
+        # A missing explanation or rewrite doesn't make the detection wrong:
+        # keep it with a category-based reason, and an empty suggestion (the
+        # frontend then offers no replacement instead of deleting the span).
+        if not reason:
+            reason = _FALLBACK_REASONS[category]
+        if s.lower() == span_lower:
+            s = ""
         if span_lower in NEUTRAL_TERMS or span_lower.endswith("person"):
             dropped.append((span, "already gender-neutral"))
             continue
@@ -524,6 +567,7 @@ def _call_llm(text: str) -> str:
                 ],
                 "max_tokens": LLM_MAX_TOKENS,
                 "temperature": 0,
+                **LLM_PARAMS,
             },
             timeout=LLM_TIMEOUT,
         )
@@ -544,12 +588,18 @@ def _call_llm(text: str) -> str:
                 err.retryable = wait <= LLM_MAX_RETRY_AFTER
         raise err
     try:
-        return resp.json()["choices"][0]["message"]["content"] or ""
+        choice = resp.json()["choices"][0]
+        content = choice["message"].get("content") or ""
     except (ValueError, KeyError, IndexError, TypeError) as e:
         raise _LLMError(f"unexpected response shape: {resp.text[:300]}") from e
+    if not content.strip() and choice.get("finish_reason") == "length":
+        # Distinct from malformed JSON: the model used the whole budget
+        # (typically on hidden reasoning) before writing any answer.
+        raise _LLMError(f"model hit max_tokens ({LLM_MAX_TOKENS}) before answering")
+    return content
 
 
-def _llm_analyze_chunk(text: str) -> tuple:
+def _llm_analyze_chunk(text: str, label: str = "1/1") -> tuple:
     """
     Asks Llama 3.1 (via the configured provider) for contextual bias in one chunk.
     Returns (items, error): items is a list of validated detections ([] means
@@ -557,6 +607,7 @@ def _llm_analyze_chunk(text: str) -> tuple:
     analyzed, in which case error explains why.
     """
     last_error = None
+    started = time.time()
     for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
         try:
             raw = _call_llm(text)
@@ -577,6 +628,9 @@ def _llm_analyze_chunk(text: str) -> tuple:
         kept, dropped = _validate_llm_items(items, text)
         for word, why in dropped:
             _log(f"dropped LLM finding {word!r}: {why}")
+        # Evidence that the model actually read this chunk — counts only, no user text.
+        _log(f"chunk {label}: OK {len(text)} chars, model returned {len(items)} finding(s), "
+             f"{len(kept)} kept, {time.time() - started:.1f}s")
         return kept, None
 
     return None, last_error
@@ -595,13 +649,18 @@ def _llm_analyze(text: str) -> tuple:
         _log(f"WARNING: {LLM_KEY_ENV} not set — falling back to rule-based detection only (no contextual/LLM coverage).")
         return None, f"{LLM_KEY_ENV} not set"
 
-    chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)[:LLM_MAX_CHUNKS]
+    all_chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)
+    chunks = all_chunks[:LLM_MAX_CHUNKS]
+    skipped = len(all_chunks) - len(chunks)
+    _log(f"LLM analysis via {LLM_PROVIDER} ({LLM_MODEL}): {len(text)} chars in {len(chunks)} chunk(s)"
+         + (f"; {skipped} more chunk(s) over the {LLM_MAX_CHUNKS}-chunk limit NOT sent" if skipped else ""))
+    labels = [f"{i}/{len(chunks)}" for i in range(1, len(chunks) + 1)]
 
     if len(chunks) == 1:
         results = [_llm_analyze_chunk(chunks[0])]
     else:
         with ThreadPoolExecutor(max_workers=min(len(chunks), LLM_MAX_WORKERS)) as pool:
-            results = list(pool.map(_llm_analyze_chunk, chunks))
+            results = list(pool.map(_llm_analyze_chunk, chunks, labels))
 
     combined: List[Dict] = []
     seen_words = set()
@@ -618,8 +677,17 @@ def _llm_analyze(text: str) -> tuple:
         _log(f"LLM analyzed {ok}/{len(results)} chunk(s); first error: {errors[0]}")
     if ok == 0:
         return None, errors[0]
-    error = f"{len(errors)} of {len(results)} chunks failed: {errors[0]}" if errors else None
-    return combined, error
+    # Any part of the text the AI didn't read makes the result partial — say
+    # so explicitly instead of presenting it as a complete review.
+    if not errors and not skipped:
+        return combined, None
+    reasons = []
+    if errors:
+        reasons.append(f"{len(errors)} failed ({errors[0][:160]})")
+    if skipped:
+        reasons.append(f"{skipped} over the AI length limit")
+    return combined, (f"{len(errors) + skipped} of {len(all_chunks)} part(s) not reviewed by AI: "
+                      + "; ".join(reasons))
 
 
 def _merge(patterns: List[Dict], llm_items: List[Dict]) -> List[Dict]:
@@ -725,6 +793,9 @@ def analyze(text: str) -> dict:
         "color":      COLOR_MAP[label],
         "words":      words,
         "ai_powered": ai_powered,
+        # True when the AI ran but didn't review the whole text (some parts
+        # failed, or the text is over the AI length limit) — see ai_error.
+        "ai_partial": ai_powered and ai_error is not None,
         # Why contextual analysis was skipped or partial (None when it ran
         # cleanly) — lets the client/logs distinguish "no bias" from "AI down".
         "ai_error":   ai_error,

@@ -115,9 +115,11 @@ export function fixOne(text, detected, word, suggestion) {
   return { text: newText, detected: remaining }
 }
 
-// ── rewriteAll — applies every suggestion to exactly what is highlighted. ────
+// ── rewriteAll — applies every suggestion to exactly what is highlighted.
+// A finding without a suggestion is left as written, never deleted. ────────
 export function rewriteAll(text, detected) {
   const edits = biasRanges(text, detected)
+    .filter(r => r.item.suggestion)
     .map(r => ({ start: r.start, end: r.end, replacement: r.item.suggestion }))
   return applyEdits(text, edits).text
 }

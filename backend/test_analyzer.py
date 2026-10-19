@@ -141,6 +141,29 @@ class LLMLayerTests(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         self.assertTrue(result["ai_powered"])
 
+    def test_partial_chunk_failure_is_reported_as_partial(self):
+        para = "The team reviewed the quarterly figures together. " * 50
+        text = para + "\n\n" + para
+        with mock.patch.object(analyzer, "LLM_MAX_WORKERS", 1):
+            result, post = self.run_with(text, _reply({"items": []}), _reply("down", 400))
+        self.assertEqual(post.call_count, 2)
+        self.assertTrue(result["ai_powered"])
+        self.assertTrue(result["ai_partial"])
+        self.assertIn("1 of 2 part(s) not reviewed by AI: 1 failed", result["ai_error"])
+
+    def test_text_over_chunk_limit_is_reported_as_partial(self):
+        para = "The team reviewed the quarterly figures together. " * 50
+        text = "\n\n".join([para] * 3)
+        with mock.patch.object(analyzer, "LLM_MAX_CHUNKS", 2):
+            result, post = self.run_with(text, _reply({"items": []}), _reply({"items": []}))
+        self.assertEqual(post.call_count, 2)
+        self.assertTrue(result["ai_partial"])
+        self.assertIn("1 of 3 part(s) not reviewed by AI: 1 over the AI length limit", result["ai_error"])
+
+    def test_full_success_is_not_partial(self):
+        result, _ = self.run_with("The team met today.", _reply({"items": []}))
+        self.assertFalse(result["ai_partial"])
+
     def test_lexicon_and_llm_findings_merge_without_duplicates(self):
         text = "The chairman said every member should bring his badge."
         result, _ = self.run_with(text, _reply({"items": [
@@ -154,6 +177,27 @@ class LLMLayerTests(unittest.TestCase):
             _item("Women are naturally better at client care", "female", "stereotype", "x", "r")]}))
         self.assertEqual([d["word"] for d in result["detected"]], ["women are naturally better"])
         self.assertEqual(result["score"], 20)
+
+    def test_misquoted_phrase_maps_to_the_texts_own_span(self):
+        text = "Babae ka kasi, dapat nasa bahay ka lang."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("Babae ka, dapat nasa bahay ka", "female", "stereotype", "x", "r")]}))
+        self.assertEqual(result["detected"][0]["word"], "Babae ka kasi, dapat nasa bahay ka")
+
+    def test_loose_matching_needs_three_words(self):
+        result, _ = self.run_with("The team met today.", _reply({"items": [
+            _item("team today", "male", "stereotype", "x", "r")]}))
+        self.assertEqual(result["detected"], [])
+
+    def test_missing_suggestion_or_reason_keeps_the_finding(self):
+        text = "We won't promote her to manager since she will want kids."
+        result, _ = self.run_with(text, _reply({"items": [
+            {"word": "won't promote her to manager", "type": "female",
+             "category": "discrimination", "suggestion": "", "reason": ""}]}))
+        d = result["detected"][0]
+        self.assertEqual(d["suggestion"], "")
+        self.assertTrue(d["reason"])
+        self.assertEqual(result["label"], "FEMALE-BIASED")
 
     # ── Exact spans for generic pronouns ──────────────────────────────────────
     def test_generic_pronoun_spans_skip_specific_uses_of_same_word(self):
