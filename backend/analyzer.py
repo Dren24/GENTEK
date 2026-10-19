@@ -22,12 +22,16 @@ load_dotenv()
 _PROVIDERS = {
     "huggingface": {
         "url":     "https://router.huggingface.co/v1/chat/completions",
-        "model":   "meta-llama/Llama-3.1-8B-Instruct",
+        "models":  ["meta-llama/Llama-3.1-8B-Instruct"],
         "key_env": "HF_API_KEY",
     },
     "groq": {
         "url":     "https://api.groq.com/openai/v1/chat/completions",
-        "model":   "openai/gpt-oss-20b",
+        # Tried in order. Groq's free tier caps tokens per model per day, so
+        # when one model is rate-limited for longer than LLM_MAX_RETRY_AFTER
+        # the next one takes over — roughly doubling daily capacity.
+        # gpt-oss-120b scored 12/12 on the mixed English/Tagalog/Bisaya check.
+        "models":  ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
         "key_env": "GROQ_API_KEY",
         # gpt-oss is a reasoning model; at its default effort it can spend the
         # whole token budget reasoning and return an empty answer (observed on
@@ -53,9 +57,11 @@ _preset      = _PROVIDERS[LLM_PROVIDER]
 LLM_PARAMS   = _preset.get("params", {})
 LLM_KEY_ENV  = _preset["key_env"]
 LLM_API_KEY  = _env(LLM_KEY_ENV)
-LLM_MODEL    = _env("LLM_MODEL") or _preset["model"]
+# LLM_MODEL may name one model or a comma-separated fallback list.
+LLM_MODELS   = [m.strip() for m in _env("LLM_MODEL").split(",") if m.strip()] or _preset["models"]
+LLM_MODEL    = LLM_MODELS[0]  # primary — shown in logs and evaluation output
 CHAT_URL     = _env("LLM_API_URL") or _preset["url"]
-print(f"[analyzer] LLM provider: {LLM_PROVIDER} ({LLM_MODEL}), key {LLM_KEY_ENV} "
+print(f"[analyzer] LLM provider: {LLM_PROVIDER} ({' -> '.join(LLM_MODELS)}), key {LLM_KEY_ENV} "
       f"{'set' if LLM_API_KEY else 'NOT set'}", flush=True)
 
 # ── LLM chunking config ────────────────────────────────────────────────────────
@@ -334,7 +340,12 @@ _SYSTEM_PROMPT = (
     "to a particular person or character — named or not — are ordinary references: 'her' in a "
     "love song, 'he' in a story, 'my sister', 'his mother', 'the girl next door'. This holds in "
     "every language: kinship terms and honorifics for particular people (Filipino 'Ate', 'Kuya', "
-    "'Tita'; 'Mr.', 'Mrs.', 'Señora') are references, not bias. Most texts "
+    "'Tita'; 'Mr.', 'Mrs.', 'Señora') are references, not bias. Describing what particular "
+    "people did or do ('Mom cooked dinner and Dad washed the dishes') is a report, not a "
+    "stereotype, even when it matches a traditional role — a stereotype is a claim about what a "
+    "gender in general is, can, or should do. In Tagalog, 'lalaki' also means 'will grow' "
+    "('lalaki ang kita'), and 'pambabae'/'panlalaki' labeling restrooms or clothing is not "
+    "bias. Most texts "
     "contain no gender bias at all, and an empty list is the normal, correct answer for them. "
     "Never invent a finding to have something to report.\n\n"
     "Report a span ONLY if it fits one of these categories:\n"
@@ -355,7 +366,9 @@ _SYSTEM_PROMPT = (
     "also covers IMPLICIT gender-role framing, common in songs and stories, when the text clearly "
     "casts one gender as the active pursuer, owner, or winner and the other as a passive prize, "
     "possession, or reward ('win her like a trophy', 'claim your girl', 'she's his reward'), or "
-    "has a woman exist only to comfort, fix, or serve a man. For that framing, type is the gender "
+    "states that a woman's role or purpose is only to comfort, fix, or serve a man ('her only job is "
+    "to keep him happy'). Love, devotion, or praise of a partner ('she is all I need', 'you make "
+    "me better') is NOT this. For that framing, type is the gender "
     "cast as the prize or possession. Ordinary affection, longing, missing someone, or simply "
     "being together is NOT this — only flag a clear pursue/possess/reward framing. A "
     "gender-coded trait word (bossy, nurturing, emotional, aggressive, hysterical) is NOT a "
@@ -367,7 +380,10 @@ _SYSTEM_PROMPT = (
     "- word: the biased span copied EXACTLY from the text (same spelling), as short as possible "
     "and at most 8 words. For stereotype/discrimination, use the phrase that carries the claim — "
     "never a lone pronoun.\n"
-    "- type: \"male\" or \"female\" — the gender the bias favors, targets, or stereotypes.\n"
+    "- type: \"male\" or \"female\" — the gender the biased statement is ABOUT: the gender "
+    "being stereotyped, excluded, demeaned, or assumed. 'Women can't be engineers' -> female; "
+    "'Every engineer ... his code' -> male; 'Real men don't cry' -> male; 'chairman' -> male; "
+    "'housewife' -> female.\n"
     "- category: one of gendered_term, generic_pronoun, stereotype, discrimination.\n"
     "- antecedent: for generic_pronoun only, the exact generic noun phrase from the text the "
     "pronoun refers to (e.g. \"each engineer\"); otherwise \"\".\n"
@@ -392,6 +408,19 @@ _GENDER_SPECIFIC_WORDS = _FEMALE_CONTEXT_WORDS | _MALE_CONTEXT_WORDS | {
     # Filipino kinship terms / honorifics
     "nanay", "tatay", "ina", "ama", "ate", "kuya", "tita", "tito", "lola", "lolo",
     "inahan", "amahan", "manang", "manong", "inday", "dodong",
+}
+
+# A stereotype is a claim about a gender in general. A flagged span whose
+# subject is a particular family member (and that names no gender in general)
+# is a report of what someone did — "Si Nanay ang nagluto" — not a stereotype.
+_KINSHIP_WORDS = {
+    "mom", "mum", "mother", "dad", "father", "grandma", "grandpa", "grandmother", "grandfather",
+    "aunt", "auntie", "uncle", "nanay", "tatay", "inay", "itay", "mama", "papa", "lola", "lolo",
+    "ate", "kuya", "tita", "tito", "inahan", "amahan", "manang", "manong", "inday", "dodong",
+}
+_GENERIC_GENDER_WORDS = {
+    "women", "men", "girls", "boys", "ladies", "gentlemen", "females", "males", "female", "male",
+    "woman", "man", "girl", "boy", "babae", "babaye", "lalaki", "kababaihan", "kalalakihan",
 }
 
 _SPAN_STRIP = " \t\r\n\"'`“”‘’.,;:!?()[]{}"
@@ -549,6 +578,17 @@ def _validate_llm_items(items: list, text: str) -> tuple:
 
         span_words = re.findall(r"[a-z']+", span_lower)
         is_bare_gender_word = len(span_words) == 1 and span_words[0] in _GENDER_SPECIFIC_WORDS
+        if (category == "stereotype" and set(span_words) & _KINSHIP_WORDS
+                and not set(span_words) & _GENERIC_GENDER_WORDS):
+            dropped.append((span, "describes a particular family member, not a gender in general"))
+            continue
+        # A gendered_term must be a title/term that has a neutral alternative
+        # (chairman -> chairperson). A bare word for a gender — 'women',
+        # 'lalaki', 'pambabae' (a restroom label) — isn't one.
+        if category == "gendered_term" and (
+                is_bare_gender_word or re.fullmatch(r"pa[mn]g?-?(babae|babaye|lalaki)", span_lower)):
+            dropped.append((span, "bare gender word is not a gendered title"))
+            continue
         if category == "generic_pronoun" or (is_bare_gender_word and span_words[0] in _PRONOUNS):
             antecedent = str(d.get("antecedent") or "").strip()
             ante_match = _find_span(antecedent, text) if antecedent else None
@@ -580,7 +620,7 @@ class _LLMError(Exception):
     """A chunk's LLM call could not produce a usable answer."""
 
 
-def _call_llm(text: str) -> str:
+def _call_llm(text: str, model: str = None) -> str:
     """One chat-completion request; returns the reply content. Raises _LLMError
     with a readable cause (HTTP status + API message, timeout, bad shape)."""
     try:
@@ -588,7 +628,7 @@ def _call_llm(text: str) -> str:
             CHAT_URL,
             headers={"Authorization": f"Bearer {LLM_API_KEY}"},
             json={
-                "model": LLM_MODEL,
+                "model": model or LLM_MODEL,
                 "messages": [
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": f"<text>\n{text}\n</text>"},
@@ -605,6 +645,7 @@ def _call_llm(text: str) -> str:
         # Surface the API's actual error (e.g. depleted credits, invalid key,
         # rate limit) instead of a bare KeyError from an error body.
         err = _LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+        err.status = resp.status_code
         err.retryable = resp.status_code not in _NON_RETRYABLE_STATUS
         if resp.status_code == 429:
             try:
@@ -627,55 +668,74 @@ def _call_llm(text: str) -> str:
     return content
 
 
+# model -> time.time() until which it's rate-limited (set when a model asks us
+# to wait longer than LLM_MAX_RETRY_AFTER, e.g. a daily token cap). Requests
+# skip cooling models and go straight to the next one in LLM_MODELS.
+_model_cooldown: Dict[str, float] = {}
+_DEFAULT_COOLDOWN = 60.0  # when a 429 gives no Retry-After
+
+
 def _llm_analyze_chunk(text: str, label: str = "1/1") -> tuple:
     """
-    Asks Llama 3.1 (via the configured provider) for contextual bias in one chunk.
-    Returns (items, error): items is a list of validated detections ([] means
-    the model read the text and found no bias) or None if the chunk could not be
-    analyzed, in which case error explains why.
+    Asks the configured model(s) for contextual bias in one chunk.
+    Returns (items, error, model): items is a list of validated detections ([]
+    means the model read the text and found no bias) or None if no model could
+    analyze it, in which case error explains why; model is the one that answered.
     """
-    last_error = None
+    last_error = "all models are rate-limited"
     started = time.time()
-    for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
-        try:
-            raw = _call_llm(text)
-        except _LLMError as e:
-            last_error = str(e)
-            _log(f"LLM request failed (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {last_error}")
-            if not getattr(e, "retryable", True) or attempt == LLM_MAX_ATTEMPTS:
-                break
-            time.sleep(getattr(e, "retry_after", None) or 1.0 * attempt)
+    for model in LLM_MODELS:
+        if _model_cooldown.get(model, 0) > time.time():
             continue
+        for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
+            try:
+                raw = _call_llm(text, model)
+            except _LLMError as e:
+                last_error = str(e)
+                _log(f"LLM request to {model} failed (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {last_error}")
+                status = getattr(e, "status", None)
+                if status in (401, 402, 403):
+                    return None, last_error, None  # key/billing problem — same for every model
+                if status == 429 and not e.retryable or status == 429 and getattr(e, "retry_after", None) is None:
+                    wait = getattr(e, "retry_after", None) or _DEFAULT_COOLDOWN
+                    _model_cooldown[model] = time.time() + wait
+                    _log(f"{model} rate-limited for ~{wait:.0f}s; trying the next model")
+                    break
+                if not e.retryable or attempt == LLM_MAX_ATTEMPTS:
+                    break
+                time.sleep(getattr(e, "retry_after", None) or 1.0 * attempt)
+                continue
 
-        items = _parse_llm_json(raw)
-        if items is None:
-            last_error = "unparseable model output"
-            _log(f"LLM output not valid JSON (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {raw[:300]!r}")
-            continue
+            items = _parse_llm_json(raw)
+            if items is None:
+                last_error = "unparseable model output"
+                _log(f"LLM output from {model} not valid JSON (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {raw[:300]!r}")
+                continue
 
-        kept, dropped = _validate_llm_items(items, text)
-        for word, why in dropped:
-            _log(f"dropped LLM finding {word!r}: {why}")
-        # Evidence that the model actually read this chunk — counts only, no user text.
-        _log(f"chunk {label}: OK {len(text)} chars, model returned {len(items)} finding(s), "
-             f"{len(kept)} kept, {time.time() - started:.1f}s")
-        return kept, None
+            kept, dropped = _validate_llm_items(items, text)
+            for word, why in dropped:
+                _log(f"dropped LLM finding {word!r}: {why}")
+            # Evidence that the model actually read this chunk — counts only, no user text.
+            _log(f"chunk {label}: OK via {model}, {len(text)} chars, model returned {len(items)} "
+                 f"finding(s), {len(kept)} kept, {time.time() - started:.1f}s")
+            return kept, None, model
 
-    return None, last_error
+    return None, last_error, None
 
 
 def _llm_analyze(text: str) -> tuple:
     """
     Runs the LLM over the full text, chunking long submissions (never
     truncating). Findings from every chunk are combined and deduplicated by word.
-    Returns (items, error):
+    Returns (items, error, models):
       - items is None only if no chunk could be analyzed, so callers can tell
         "LLM unavailable" apart from "LLM ran and found nothing";
-      - error is a short cause string whenever any chunk failed, else None.
+      - error is a short cause string whenever any chunk failed, else None;
+      - models lists the model(s) that answered.
     """
     if not LLM_API_KEY:
         _log(f"WARNING: {LLM_KEY_ENV} not set — falling back to rule-based detection only (no contextual/LLM coverage).")
-        return None, f"{LLM_KEY_ENV} not set"
+        return None, f"{LLM_KEY_ENV} not set", []
 
     all_chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)
     chunks = all_chunks[:LLM_MAX_CHUNKS]
@@ -692,8 +752,9 @@ def _llm_analyze(text: str) -> tuple:
 
     combined: List[Dict] = []
     seen_words = set()
-    errors = [err for items, err in results if items is None]
-    for items, _ in results:
+    errors = [err for items, err, _ in results if items is None]
+    models_used = sorted({m for _, _, m in results if m})
+    for items, _, _ in results:
         for d in items or []:
             w = d["word"].lower()
             if w not in seen_words:
@@ -704,18 +765,18 @@ def _llm_analyze(text: str) -> tuple:
     if errors:
         _log(f"LLM analyzed {ok}/{len(results)} chunk(s); first error: {errors[0]}")
     if ok == 0:
-        return None, errors[0]
+        return None, errors[0], []
     # Any part of the text the AI didn't read makes the result partial — say
     # so explicitly instead of presenting it as a complete review.
     if not errors and not skipped:
-        return combined, None
+        return combined, None, models_used
     reasons = []
     if errors:
         reasons.append(f"{len(errors)} failed ({errors[0][:160]})")
     if skipped:
         reasons.append(f"{skipped} over the AI length limit")
     return combined, (f"{len(errors) + skipped} of {len(all_chunks)} part(s) not reviewed by AI: "
-                      + "; ".join(reasons))
+                      + "; ".join(reasons)), models_used
 
 
 def _merge(patterns: List[Dict], llm_items: List[Dict]) -> List[Dict]:
@@ -785,7 +846,7 @@ def analyze(text: str) -> dict:
     patterns = _pattern_detect(text)
 
     # Step 2: run LLM for contextual bias (pronouns, stereotypes)
-    llm_items, ai_error = _llm_analyze(text)
+    llm_items, ai_error, ai_models = _llm_analyze(text)
     ai_powered = llm_items is not None
 
     # Step 3: merge — patterns are ground truth, LLM adds context-aware findings.
@@ -827,4 +888,7 @@ def analyze(text: str) -> dict:
         # Why contextual analysis was skipped or partial (None when it ran
         # cleanly) — lets the client/logs distinguish "no bias" from "AI down".
         "ai_error":   ai_error,
+        # Which model(s) actually answered (fallbacks may take over when the
+        # primary is rate-limited) — empty when the AI didn't run.
+        "ai_models":  ai_models,
     }

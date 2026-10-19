@@ -61,3 +61,15 @@ rule-based lexicon detector directly.
 This is a manually prepared validation set designed to test known system
 requirements and lexicon coverage. It is not a randomized public benchmark and
 should not be described as training data.
+
+Known AI-layer limitations observed during live testing:
+
+- Tagalog "lalaki" means both "man/male" and "will grow". The AI can misread
+  the "will grow" sense (e.g. "Lalaki rin ang negosyo mo") as a gender
+  reference. No reliable rule separates the two, since "Lalaki ang anak niya"
+  ("her child is a boy") is a genuine gender reference.
+- Tagalog and Bisaya are handled by the AI; the lexicon covers only a small set
+  of stock phrases in those languages. Other Philippine languages are untested.
+- On Groq's free tier, each model has a daily token cap. GENTEK falls back to a
+  second model when the first is exhausted; when both are, analysis is
+  keyword-only and the UI says so.
