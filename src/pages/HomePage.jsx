@@ -23,6 +23,7 @@ import { BrainIcon, GentekMark } from '../components/shared/GentekLogo'
 import { useAuth } from '../context/AuthContext'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import AuthModal from '../components/shared/AuthModal'
+import { escapeRx, escapeHtml, highlightHtml, fixOne, rewriteAll } from '../utils/biasHighlight'
 
 // ── FREE_WORD_LIMIT — max words a Free (non-premium) logged-in user can have
 // analyzed in one go. Configurable without a code change via VITE_FREE_WORD_LIMIT;
@@ -62,22 +63,6 @@ const SAMPLES = {
   report:     `The girl boss of the marketing division led the campaign. Our lady doctor on call responded professionally. The congressman approved the legislation after a heated debate. Hysterical coverage in the media followed the announcement.`,
   female:     `The new manager was dismissed as bossy and hysterical when she proposed the restructuring plan. A nurturing housewife type is better suited for this client-facing role. The lady doctor on call responded professionally. Our stewardess welcomed every passenger warmly.`,
   male:       `The chairman of the board approved the proposal. The manpower required for this project is significant. Every businessman understands the risks. The fireman arrived promptly at the scene.`,
-}
-
-// ── runAnalysis — client-side analysis fallback (no server required) ──────────
-// Mirrors the scoring logic in backend/analyzer.py — keep them in sync.
-function escapeRx(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-// ── escapeAttr — escapes a string for safe use inside an HTML attribute value ──
-function escapeAttr(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-// ── escapeHtml — escapes a string for safe use as HTML text content ──────────
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 // ── splitAtWordLimit — splits text into the first `limit` words ("head") and
@@ -121,6 +106,8 @@ function localColor(label) {
        : '#0D9488'
 }
 
+// ── runAnalysis — client-side analysis fallback (no server required) ──────────
+// Mirrors the scoring logic in backend/analyzer.py — keep them in sync.
 function runAnalysis(text) {
   const detected = BIAS_PATTERNS.filter(p => new RegExp(`\\b${escapeRx(p.word).replace(/\s+/g, '\\s+')}\\b`, 'i').test(text))
   const male   = detected.filter(p => p.type === 'male').length
@@ -131,14 +118,7 @@ function runAnalysis(text) {
     score = Math.min(95, 40 + Math.max(male, female) * 15)
     color = label === 'FEMALE-BIASED' ? '#F43F5E' : '#3B82F6'
   }
-  // Build highlighted HTML — escape user text first to prevent XSS, then wrap bias words in <mark>
-  let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  detected.forEach(({ word, type, suggestion, reason }) => {
-    const cls = type === 'male' ? 'bias-male' : 'bias-female'
-    // Data attributes let the results panel show a popup with the original match's casing preserved
-    html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g,'\\s+')}\\b`, 'gi'), (m) =>
-      `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${m}</mark>`)
-  })
+  const html = highlightHtml(text, detected)
   return { detected, male, female, label, score, color, html, words: text.trim().split(/\s+/).length }
 }
 
@@ -271,6 +251,10 @@ export default function HomePage() {
   const [canForward, setCanForward] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showAuthPrompt, setShowAuthPrompt] = useState(false)  // login popup on 2nd guest analysis
+  // Text whose last analysis ran without the AI model (keyword list only) and
+  // found nothing — results are cleared then, so this keeps the notice visible
+  // until the text changes. Non-empty results carry ai_powered themselves.
+  const [rulesOnlyText, setRulesOnlyText] = useState(null)
   const textareaRef              = useRef(null)
   const overlayRef               = useRef(null)        // mirrors textarea scroll for the Free-limit fade overlay
   const fileInputRef             = useRef(null)
@@ -471,17 +455,11 @@ export default function HomePage() {
     ? splitAtWordLimit(text, FREE_WORD_LIMIT)
     : { head: text, tail: '' }
 
-  // ── buildHtml — HTML-escapes user text first, then wraps bias words in <mark>
-  // Escaping first prevents XSS when text is injected via dangerouslySetInnerHTML.
-  const buildHtml = (text, detected) => {
-    let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    detected.forEach(({ word, type, suggestion, reason }) => {
-      const cls = type === 'male' ? 'bias-male' : 'bias-female'
-      html = html.replace(new RegExp(`\\b${escapeRx(word).replace(/\s+/g, '\\s+')}\\b`, 'gi'), (m) =>
-        `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${m}</mark>`)
-    })
-    return html
-  }
+  // ── rulesOnly — the shown analysis didn't get contextual AI review (model
+  // unavailable or API unreachable), so a clean result isn't a full check ──
+  const rulesOnly = results
+    ? results.ai_powered === false
+    : rulesOnlyText !== null && (rulesOnlyText === text || rulesOnlyText === analyzableText)
 
   // ── normalizeApiResult — coerces API response into a consistent result shape ──
   // Fills in derived fields (label, color, html) if the backend didn't return them.
@@ -503,7 +481,7 @@ export default function HomePage() {
       score,
       color: data.color || (label === 'MALE-BIASED' ? '#3B82F6' : label === 'FEMALE-BIASED' ? '#F43F5E' : '#0D9488'),
       words: data.words || inputText.trim().split(/\s+/).length,
-      html: buildHtml(inputText, detected),
+      html: highlightHtml(inputText, detected),
     }
   }
 
@@ -529,7 +507,7 @@ export default function HomePage() {
       return
     }
 
-    setAna(true); setResults(null)
+    setAna(true); setResults(null); setRulesOnlyText(null)
     let succeeded = false
     try {
       const res = await fetch('/analyze', {
@@ -545,16 +523,18 @@ export default function HomePage() {
       // leaving an "Analyzed — no bias" status up — same behavior as after
       // Rewrite Text. The result is still saved to history either way.
       setResults(r.detected.length === 0 ? null : r)
+      if (r.ai_powered === false) setRulesOnlyText(inputText)
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
       succeeded = true
     } catch {
-      const r = runAnalysis(inputText)
+      const r = { ...runAnalysis(inputText), ai_powered: false }
       // Zero detections: reset to the plain pre-analysis state instead of
       // leaving an "Analyzed — no bias" status up — same behavior as after
       // Rewrite Text. The result is still saved to history either way.
       setResults(r.detected.length === 0 ? null : r)
+      setRulesOnlyText(inputText)
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
@@ -608,24 +588,14 @@ export default function HomePage() {
   // ── Keyboard shortcut — Cmd/Ctrl+Enter triggers analysis ─────────────────
   const handleKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); analyze() } }
 
-  // ── replaceBias — robust replacement that handles single words and phrases ──
-  const replaceBias = (src, word, suggestion) => {
-    // Sort longest-first to prevent partial-word clobbering across replacements
-    const escaped = escapeRx(word).replace(/\s+/g, '\\s+')
-    const rx = new RegExp(`(?<![\\w])${escaped}(?![\\w])`, 'gi')
-    const result = src.replace(rx, suggestion)
-    // If lookahead/behind didn't match (old browser), fall back to \b version
-    return result !== src ? result : src.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), suggestion)
-  }
-
   // ── applyFix — replaces one detected word/phrase with its suggestion,
-  // entirely on the client: no re-analysis, no API/LLM call. Only that term's
-  // entry is dropped from `detected` and the score/highlighting recomputed
-  // locally from the remaining items; the rest of the text is untouched. ────
+  // entirely on the client: no re-analysis, no API/LLM call. Only the
+  // occurrences highlighted for that term are replaced (for AI-flagged generic
+  // pronouns, just those spans — not every "he" in the text); its entry is
+  // dropped from `detected` and the score/highlighting recomputed locally. ──
   const applyFix = (word, suggestion) => {
     if (!results) return
-    const newText = replaceBias(text, word, suggestion)
-    const updatedDetected = results.detected.filter(d => d.word.toLowerCase() !== word.toLowerCase())
+    const { text: newText, detected: updatedDetected } = fixOne(text, results.detected, word, suggestion)
     const male   = updatedDetected.filter(d => d.type === 'male').length
     const female = updatedDetected.filter(d => d.type === 'female').length
     const { label, score } = localScore(updatedDetected)
@@ -638,7 +608,7 @@ export default function HomePage() {
       label,
       score,
       color: localColor(label),
-      html: buildHtml(newText, updatedDetected),
+      html: highlightHtml(newText, updatedDetected),
       words: newText.trim() ? newText.trim().split(/\s+/).length : 0,
     }))
     pushTextStack(newText)
@@ -650,10 +620,8 @@ export default function HomePage() {
   // user can re-run analysis on the rewritten version whenever they choose. ──
   const rewriteText = () => {
     if (!results || !results.detected?.length) return
-    // Apply longest phrases first to avoid partial replacements
-    const sorted = [...results.detected].sort((a, b) => b.word.length - a.word.length)
-    let out = text
-    sorted.forEach(d => { out = replaceBias(out, d.word, d.suggestion) })
+    // Replaces exactly what is highlighted (overlaps already resolved)
+    const out = rewriteAll(text, results.detected)
     setText(out)
     setResults(null)
     pushTextStack(out)
@@ -759,6 +727,14 @@ export default function HomePage() {
                   {results?.ai_powered && (
                     <span className="flex items-center gap-1 text-[10px] font-bold text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 px-2 py-0.5 rounded-full">
                       <Sparkle size={9} weight="fill" />AI
+                    </span>
+                  )}
+                  {rulesOnly && (
+                    <span
+                      title="The AI model couldn't be reached, so only GENTEK's built-in keyword list was checked. Contextual bias may have been missed — try again later."
+                      className="flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 px-2 py-0.5 rounded-full"
+                    >
+                      <WarningCircle size={10} weight="fill" />Keyword check only
                     </span>
                   )}
                 </div>

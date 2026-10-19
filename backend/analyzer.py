@@ -323,17 +323,49 @@ def _log(msg: str) -> None:
     print(f"[analyzer] {msg}", flush=True)
 
 
-def _find_span(phrase: str, text: str) -> Optional[re.Match]:
-    """Locates a model-quoted phrase in the text, tolerating differences in
-    case, surrounding punctuation/quotes, and whitespace (line breaks in lyrics
-    and poems are common). Returns the match so the caller can use the text's
-    own spelling of the span."""
-    phrase = phrase.strip(_SPAN_STRIP)
-    tokens = phrase.split()
+def _span_pattern(phrase: str) -> Optional[re.Pattern]:
+    """Regex for a model-quoted phrase, tolerating differences in case,
+    surrounding punctuation/quotes, and whitespace (line breaks in lyrics and
+    poems are common)."""
+    tokens = phrase.strip(_SPAN_STRIP).split()
     if not tokens:
         return None
     pattern = r'\s+'.join(re.escape(t) for t in tokens)
-    return re.search(r'(?<!\w)' + pattern + r'(?!\w)', text, re.IGNORECASE)
+    return re.compile(r'(?<!\w)' + pattern + r'(?!\w)', re.IGNORECASE)
+
+
+def _find_span(phrase: str, text: str) -> Optional[re.Match]:
+    """First occurrence of a model-quoted phrase in the text (see _span_pattern).
+    Returns the match so the caller can use the text's own spelling of the span."""
+    rx = _span_pattern(phrase)
+    return rx.search(text) if rx else None
+
+
+_CLAUSE_END = re.compile(r'[.!?;\n]')
+
+
+def _js_offset(text: str, i: int) -> int:
+    """Python code-point index -> JavaScript (UTF-16) string index, so offsets
+    stay correct for text containing emoji or other astral characters."""
+    return len(text[:i].encode("utf-16-le")) // 2
+
+
+def _generic_pronoun_spans(text: str, word: str, antecedent: str) -> List[List[int]]:
+    """Exact [start, end) offsets (UTF-16) of the generic pronoun occurrences:
+    those following an occurrence of the generic antecedent within the same
+    sentence. A text can use the same pronoun generically in one place and
+    for a specific person elsewhere ("Every pilot checks his gear. ... Tom
+    lost his keys") — only the generic uses should be highlighted/replaced."""
+    word_rx, ante_rx = _span_pattern(word), _span_pattern(antecedent)
+    if not word_rx or not ante_rx:
+        return []
+    found = set()
+    for a in ante_rx.finditer(text):
+        end = _CLAUSE_END.search(text, a.end())
+        stop = end.start() if end else len(text)
+        for m in word_rx.finditer(text, a.end(), stop):
+            found.add((m.start(), m.end()))
+    return [[_js_offset(text, s), _js_offset(text, e)] for s, e in sorted(found)]
 
 
 def _parse_llm_json(raw: str) -> Optional[list]:
@@ -420,12 +452,16 @@ def _validate_llm_items(items: list, text: str) -> tuple:
                 dropped.append((span, f"antecedent {antecedent!r} is gender-specific"))
                 continue
 
-        kept.append({
+        item = {
             "word": span,
             "type": item_type,
             "suggestion": s,
             "reason": reason,
-        })
+            "category": category,
+        }
+        if category == "generic_pronoun":
+            item["antecedent"] = antecedent  # resolved to exact spans in analyze()
+        kept.append(item)
     return kept, dropped
 
 
@@ -602,6 +638,16 @@ def analyze(text: str) -> dict:
         detected = _merge(patterns, llm_items)
     else:
         detected = patterns
+
+    # Generic pronouns are ordinary words elsewhere in the same text, so they
+    # carry exact spans; the frontend highlights/replaces only those
+    # occurrences. Every other finding is matched by word, as before.
+    for d in detected:
+        antecedent = d.pop("antecedent", None)
+        if antecedent:
+            spans = _generic_pronoun_spans(text, d["word"], antecedent)
+            if spans:
+                d["spans"] = spans
 
     # Step 4: score — male/female counts use _effective_gender() so they stay
     # consistent with the label (see _score's docstring)

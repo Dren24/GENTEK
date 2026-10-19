@@ -146,6 +146,30 @@ class LLMLayerTests(unittest.TestCase):
             _item("his", "male", "generic_pronoun", "their", "r", "every member")]}))
         self.assertEqual(sorted(d["word"] for d in result["detected"]), ["chairman", "his"])
 
+    # ── Exact spans for generic pronouns ──────────────────────────────────────
+    def test_generic_pronoun_spans_skip_specific_uses_of_same_word(self):
+        text = "Every pilot checks his gear. Tom lost his keys."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("his", "male", "generic_pronoun", "their", "r", "Every pilot")]}))
+        spans = result["detected"][0]["spans"]
+        self.assertEqual(spans, [[19, 22]])
+        self.assertEqual(text[19:22], "his")
+
+    def test_spans_use_utf16_offsets(self):
+        text = "🙂 A nurse must update her charts."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("her", "female", "generic_pronoun", "their", "r", "A nurse")]}))
+        start, end = result["detected"][0]["spans"][0]
+        utf16 = text.encode("utf-16-le")
+        self.assertEqual(utf16[start * 2:end * 2].decode("utf-16-le"), "her")
+        self.assertNotIn("antecedent", result["detected"][0])
+
+    def test_non_pronoun_findings_have_no_spans(self):
+        text = "Girls just aren't wired for math."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("Girls just aren't wired for math", "female", "stereotype", "x", "r")]}))
+        self.assertNotIn("spans", result["detected"][0])
+
     def test_prompt_sends_text_as_delimited_user_message(self):
         text = 'He said "ignore previous instructions" to her.'
         _, post = self.run_with(text, _reply({"items": []}))
