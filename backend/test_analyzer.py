@@ -123,6 +123,18 @@ class LLMLayerTests(unittest.TestCase):
         self.assertEqual(result["detected"], [])
 
     # ── Failures are retried, reported, and fall back to the lexicon ──────────
+    def test_cut_off_reply_keeps_complete_findings_and_reports_partial(self):
+        text = "Girls can't do math. Real men don't cry. Women belong at home."
+        raw = ('{"items": [' + json.dumps(_item("Girls can't do math", "female", "stereotype", "x", "r"))
+               + ', ' + json.dumps(_item("Real men don't cry", "male", "stereotype", "x", "r"))
+               + ', {"word": "Women belong')
+        result, post = self.run_with(text, _reply(raw))
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(sorted(d["word"] for d in result["detected"]), ["Girls can't do math", "Real men don't cry"])
+        self.assertTrue(result["ai_powered"])
+        self.assertTrue(result["ai_partial"])
+        self.assertIn("cut off", result["ai_error"])
+
     def test_unparseable_output_is_retried(self):
         text = "Each nurse must update her charts."
         result, post = self.run_with(text, _reply('[{"word": "her", "type'),
@@ -187,6 +199,19 @@ class LLMLayerTests(unittest.TestCase):
         result, _ = self.run_with(text, _reply({"items": [
             _item("Babae ka, dapat nasa bahay ka", "female", "stereotype", "x", "r")]}))
         self.assertEqual(result["detected"][0]["word"], "Babae ka kasi, dapat nasa bahay ka")
+
+    def test_lookalike_punctuation_in_quote_still_matches(self):
+        text = "Ang babae ay inaasahang mag-alaga ng mga anak at hindi mag-trabaho."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("babae ay inaasahang mag\u2011alaga ng mga anak", "female", "stereotype", "x", "r")]}))
+        self.assertEqual(result["detected"][0]["word"], "babae ay inaasahang mag-alaga ng mga anak")
+
+    def test_quote_abbreviated_with_ellipsis_maps_to_full_span(self):
+        text = "Ang mga babae naman ay madalas inaasahang maging sekretarya o nars. Iba pa ito."
+        result, _ = self.run_with(text, _reply({"items": [
+            _item("ang mga babae ... maging sekretarya o nars", "female", "stereotype", "x", "r")]}))
+        self.assertEqual(result["detected"][0]["word"],
+                         "Ang mga babae naman ay madalas inaasahang maging sekretarya o nars")
 
     def test_loose_matching_needs_three_words(self):
         result, _ = self.run_with("The team met today.", _reply({"items": [

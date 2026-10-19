@@ -85,7 +85,10 @@ COLOR_MAP = {
 VALID_TYPES = {"male", "female"}
 
 # ── LLM request config ────────────────────────────────────────────────────────
-LLM_MAX_TOKENS     = 1200   # 700 could truncate a long findings list mid-JSON
+# Reply budget. Text dense with bias (e.g. an essay listing stereotypes) needs
+# a long findings list — 1200 tokens cut such replies off mid-JSON. Only tokens
+# actually generated count against rate limits, so a high ceiling is free.
+LLM_MAX_TOKENS     = 4000
 LLM_TIMEOUT        = 30
 LLM_MAX_ATTEMPTS   = 2      # one retry for transient failures / unparseable output
 # Statuses where retrying can't help (bad key, no credits, bad request) — fail
@@ -377,8 +380,8 @@ _SYSTEM_PROMPT = (
     "- discrimination: excluding, ranking, or demeaning people because of their gender "
     "('we won't hire women who might have kids', 'no girls allowed on the team').\n\n"
     "Fields for each finding:\n"
-    "- word: the biased span copied EXACTLY from the text (same spelling), as short as possible "
-    "and at most 8 words. For stereotype/discrimination, use the phrase that carries the claim — "
+    "- word: the biased span copied EXACTLY from the text (same spelling, never shortened with "
+    "'...'), as short as possible and at most 8 words. For stereotype/discrimination, use the phrase that carries the claim — "
     "never a lone pronoun.\n"
     "- type: \"male\" or \"female\" — the gender the biased statement is ABOUT: the gender "
     "being stereotyped, excluded, demeaned, or assumed. 'Women can't be engineers' -> female; "
@@ -393,7 +396,8 @@ _SYSTEM_PROMPT = (
     "Respond with ONLY a JSON object, no markdown or commentary:\n"
     '{"items": [{"word": "...", "type": "male", "category": "...", "antecedent": "", '
     '"suggestion": "...", "reason": "..."}]}\n'
-    'If nothing qualifies, respond {"items": []}.'
+    'If nothing qualifies, respond {"items": []}. Report each biased claim ONCE (never split one '
+    'claim into several spans), at most 15 findings, clearest first.'
 )
 
 # Single pronouns and gender-specific nouns. A finding whose span is only one of
@@ -441,11 +445,21 @@ def _span_pattern(phrase: str) -> Optional[re.Pattern]:
     return re.compile(r'(?<!\w)' + pattern + r'(?!\w)', re.IGNORECASE)
 
 
+# Look-alike characters models swap in when quoting (non-breaking hyphen,
+# en/em dash, curly quotes, non-breaking space). Each maps one character to one
+# character, so match offsets in the normalized text are valid in the original.
+_LOOKALIKES = str.maketrans({
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-",
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u00a0": " ",
+})
+
+
 def _find_span(phrase: str, text: str) -> Optional[re.Match]:
-    """First occurrence of a model-quoted phrase in the text (see _span_pattern).
-    Returns the match so the caller can use the text's own spelling of the span."""
-    rx = _span_pattern(phrase)
-    return rx.search(text) if rx else None
+    """First occurrence of a model-quoted phrase in the text (see _span_pattern),
+    ignoring look-alike punctuation. Match offsets index the original text; use
+    text[m.start():m.end()] for the text's own spelling of the span."""
+    rx = _span_pattern(phrase.translate(_LOOKALIKES))
+    return rx.search(text.translate(_LOOKALIKES)) if rx else None
 
 
 # Between consecutive quoted words: optional punctuation, then at most two
@@ -459,12 +473,20 @@ def _find_span_loose(phrase: str, text: str) -> Optional[re.Match]:
     dapat'). Every quoted word must still appear, in order, with at most two
     extra words between neighbours; needs 3+ words so short quotes can't
     match by accident. The returned match is the text's own span."""
-    words = [re.sub(r'^[^\w]+|[^\w]+$', '', t) for t in phrase.split()]
-    words = [w for w in words if w]
-    if len(words) < 3:
+    # A quote abbreviated with "..." skips words; let each "..." span up to
+    # 250 characters, but never past the end of the sentence.
+    parts = []
+    total = 0
+    for part in re.split(r'\.\.\.+|\u2026', phrase.translate(_LOOKALIKES)):
+        words = [re.sub(r'^[^\w]+|[^\w]+$', '', t) for t in part.split()]
+        words = [w for w in words if w]
+        if words:
+            parts.append(_LOOSE_GAP.join(re.escape(w) for w in words))
+            total += len(words)
+    if total < 3:
         return None
-    pattern = _LOOSE_GAP.join(re.escape(w) for w in words)
-    return re.search(r'(?<!\w)' + pattern + r'(?!\w)', text, re.IGNORECASE)
+    pattern = r'[^.!?\n]{0,250}?'.join(parts)
+    return re.search(r'(?<!\w)' + pattern + r'(?!\w)', text.translate(_LOOKALIKES), re.IGNORECASE)
 
 
 # Used when the model flags real bias but leaves the reason empty — the
@@ -526,6 +548,27 @@ def _parse_llm_json(raw: str) -> Optional[list]:
     return None
 
 
+def _salvage_truncated_items(raw: str) -> Optional[list]:
+    """Recovers the complete findings from a reply cut off mid-JSON (the model
+    ran out of reply budget): every whole {...} object in the "items" array
+    before the cut. Returns None if there's nothing recoverable."""
+    start = re.search(r'"items"\s*:\s*\[', raw)
+    if not start:
+        return None
+    decoder = json.JSONDecoder()
+    pos, items = start.end(), []
+    while True:
+        while pos < len(raw) and raw[pos] in " \t\r\n,":
+            pos += 1
+        try:
+            obj, pos = decoder.raw_decode(raw, pos)
+        except ValueError:
+            break
+        if isinstance(obj, dict):
+            items.append(obj)
+    return items or None
+
+
 def _validate_llm_items(items: list, text: str) -> tuple:
     """Keeps only findings that are well-formed and grounded in the text.
     Returns (kept, dropped) where dropped is a list of (word, why) for logging.
@@ -553,7 +596,7 @@ def _validate_llm_items(items: list, text: str) -> tuple:
         if not match:
             dropped.append((w, "span not found in text"))
             continue
-        span = match.group()
+        span = text[match.start():match.end()]
         span_lower = span.lower()
         if item_type == "stereotype":
             # Defensive: resolve the retired label the same way pattern
@@ -707,6 +750,14 @@ def _llm_analyze_chunk(text: str, label: str = "1/1") -> tuple:
                 continue
 
             items = _parse_llm_json(raw)
+            warning = None
+            if items is None:
+                items = _salvage_truncated_items(raw)
+                if items is not None:
+                    # Keep what arrived rather than discarding the whole reply,
+                    # but report it — findings after the cut are missing.
+                    warning = f"AI reply was cut off; findings after the first {len(items)} may be missing"
+                    _log(f"{model}: {warning}")
             if items is None:
                 last_error = "unparseable model output"
                 _log(f"LLM output from {model} not valid JSON (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {raw[:300]!r}")
@@ -718,7 +769,7 @@ def _llm_analyze_chunk(text: str, label: str = "1/1") -> tuple:
             # Evidence that the model actually read this chunk — counts only, no user text.
             _log(f"chunk {label}: OK via {model}, {len(text)} chars, model returned {len(items)} "
                  f"finding(s), {len(kept)} kept, {time.time() - started:.1f}s")
-            return kept, None, model
+            return kept, warning, model
 
     return None, last_error, None
 
@@ -753,6 +804,8 @@ def _llm_analyze(text: str) -> tuple:
     combined: List[Dict] = []
     seen_words = set()
     errors = [err for items, err, _ in results if items is None]
+    # Chunks the AI analyzed only partly (e.g. a cut-off reply)
+    warnings = [err for items, err, _ in results if items is not None and err]
     models_used = sorted({m for _, _, m in results if m})
     for items, _, _ in results:
         for d in items or []:
@@ -768,8 +821,10 @@ def _llm_analyze(text: str) -> tuple:
         return None, errors[0], []
     # Any part of the text the AI didn't read makes the result partial — say
     # so explicitly instead of presenting it as a complete review.
-    if not errors and not skipped:
+    if not errors and not skipped and not warnings:
         return combined, None, models_used
+    if not errors and not skipped:
+        return combined, warnings[0], models_used
     reasons = []
     if errors:
         reasons.append(f"{len(errors)} failed ({errors[0][:160]})")
