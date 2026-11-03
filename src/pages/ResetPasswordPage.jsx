@@ -1,16 +1,19 @@
 // ── ResetPasswordPage — lets the user set a new password ──────────────────────
-// Supports reset links with a token and the local bypass flow with an email.
+// Reached from the Forgot Password code step in AuthModal. The single-use reset
+// token the backend issued for the correct emailed code arrives in router
+// state (never the URL); without it — e.g. after a refresh — the user must
+// request a new code. The backend alone decides whether the token is valid.
 
 import { useState } from 'react'
-import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { LockKey, Eye, EyeSlash, CheckCircle, WarningCircle, X } from '@phosphor-icons/react'
 import GentekMark from '../components/shared/GentekLogo'
 
 export default function ResetPasswordPage() {
-  const [searchParams]          = useSearchParams()
+  const location                = useLocation()
   const navigate                = useNavigate()
-  const token                   = searchParams.get('token') || ''
-  const email                   = searchParams.get('email') || ''
+  const token                   = location.state?.resetToken || ''
+  const email                   = location.state?.email || ''
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm]   = useState('')
@@ -31,7 +34,7 @@ export default function ResetPasswordPage() {
       const res = await fetch('/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token || null, email: email || null, new_password: password }),
+        body: JSON.stringify({ token, new_password: password }),
       })
       if (!res.ok) {
         const data = await res.json()
@@ -57,14 +60,14 @@ export default function ResetPasswordPage() {
           <X size={16} weight="bold" />
         </button>
 
-        {!token && !email ? (
-          // ── No reset target in URL ─────────────────────────────────────────
+        {!token && !done ? (
+          // ── No reset session (opened directly, refreshed, or expired) ──────
           <div className="p-10 flex flex-col items-center text-center">
             <div className="w-14 h-14 rounded-full bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center">
               <WarningCircle size={28} weight="fill" className="text-rose-500" />
             </div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white mt-5 mb-2">Invalid reset link</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">This link is missing the account to reset. Please request a new one.</p>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mt-5 mb-2">Reset session expired</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Use "Forgot password?" on the log-in screen to get a new 6-digit code.</p>
             <Link to="/" className="btn-primary px-8 py-2.5">Back to Home</Link>
           </div>
 
@@ -89,7 +92,9 @@ export default function ResetPasswordPage() {
                 <GentekMark size={44} />
               </div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Set a new password</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Enter a new password for your GENTEK account.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Code verified. Enter a new password for {email ? <span className="font-semibold text-gray-700 dark:text-gray-300 break-all">{email}</span> : 'your GENTEK account'}.
+              </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">

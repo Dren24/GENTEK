@@ -1,11 +1,11 @@
 // ── AuthModal — login / signup / forgot password modal ───────────────────────
 // Opened by Navbar's "Log in" or "Sign up" buttons and the homepage CTA.
-// Internal views: 'login' | 'signup' | 'verify' | 'forgot' | 'forgot-sent' | 'done'
+// Internal views: 'login' | 'signup' | 'verify' | 'forgot' | 'done'
 // Pressing Escape or clicking outside closes the modal.
 
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, PaperPlaneTilt, ShieldCheck } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, ShieldCheck } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
 
@@ -29,7 +29,7 @@ function GoogleIcon() {
 // ── Seconds before "Resend code" is allowed — matches CODE_RESEND_SECONDS on the backend
 const RESEND_SECONDS = 60
 
-// view: 'login' | 'signup' | 'verify' | 'forgot' | 'forgot-sent' | 'done'
+// view: 'login' | 'signup' | 'verify' | 'forgot' | 'done'
 export default function AuthModal({ mode = 'signup', onClose }) {
   const { login, register, loginWithGoogle, verifyCode, resendCode } = useAuth()
   const navigate                = useNavigate()
@@ -40,7 +40,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [form, setForm]         = useState({ name: '', email: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
   const [remember, setRemember] = useState(true)
-  // ── Emailed-code step: { email, purpose: 'verify' | 'login' } ────────────
+  // ── Emailed-code step: { email, purpose: 'verify' | 'login' | 'reset' } ──
   const [pending, setPending]   = useState(null)
   const [code, setCode]         = useState('')
   const [resendIn, setResendIn] = useState(0)
@@ -160,8 +160,24 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     setLoading(true)
     setError('')
     try {
+      if (pending.purpose === 'reset') {
+        // A correct reset code returns a single-use reset token from the
+        // backend; the new-password page sends it with the new password.
+        const res = await fetch('/auth/verify-reset-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pending.email, code }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.detail || 'Verification failed')
+        onClose()
+        // Passed in router state, not the URL, so it isn't kept in history
+        navigate('/reset-password', { state: { resetToken: data.reset_token, email: pending.email } })
+        return
+      }
       await verifyCode(pending.email, code, pending.purpose, remember)
-      onClose()
+      if (pending.purpose === 'verify') setView('done')   // new account — confirm before closing
+      else onClose()
     } catch (err) {
       setError(err.message)
       // A burned code can't be retried — clear the box so they request a new one
@@ -185,7 +201,9 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     }
   }
 
-  // ── handleForgot — calls backend to send a real password reset email ────────
+  // ── handleForgot — asks the backend to email a 6-digit reset code. The reply
+  // is the same whether or not the email is registered, so the code step is
+  // always shown next. ───────────────────────────────────────────────────────
   const handleForgot = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -200,12 +218,11 @@ export default function AuthModal({ mode = 'signup', onClose }) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || 'Something went wrong. Please try again.')
       }
-      const data = await res.json()
-      const next = data.reset_url
-        ? new URL(data.reset_url, window.location.origin)
-        : new URL(`/reset-password?email=${encodeURIComponent(resetEmail)}`, window.location.origin)
-      onClose()
-      navigate(`${next.pathname}${next.search}`)
+      setPending({ email: resetEmail.trim(), purpose: 'reset' })
+      setCode('')
+      setNotice('')
+      setResendIn(RESEND_SECONDS)
+      setView('verify')
     } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.')
     } finally {
@@ -255,7 +272,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             <div className="w-16 h-16 rounded-2xl bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
               <GentekMark size={44} />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">You're in!</h3>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Email verified!</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
               Your GENTEK account is ready. Start detecting gender bias now.
             </p>
@@ -277,14 +294,18 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                 </div>
               </div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
-                {pending.purpose === 'verify' ? 'Verify your email' : 'Confirm it\'s you'}
+                {pending.purpose === 'verify' ? 'Verify your email'
+                  : pending.purpose === 'reset' ? 'Enter your reset code' : 'Confirm it\'s you'}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {pending.purpose === 'verify'
                   ? 'Enter the 6-digit code we sent to'
-                  : 'This browser is new to your account. Enter the 6-digit code we sent to'}
+                  : pending.purpose === 'reset'
+                    ? 'If an account exists for this email, we sent a 6-digit code to'
+                    : 'This browser is new to your account. Enter the 6-digit code we sent to'}
               </p>
               <p className="text-sm font-semibold text-brand-600 dark:text-brand-400 break-all mt-0.5">{pending.email}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">The code expires in 5 minutes.</p>
             </div>
 
             <div className="px-8 pb-8 space-y-4">
@@ -319,7 +340,15 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   disabled={loading || code.length !== 6}
                   className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {loading ? 'Verifying…' : pending.purpose === 'verify' ? 'Verify and continue' : 'Continue'}
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      Verifying…
+                    </span>
+                  ) : pending.purpose === 'verify' ? 'Verify and continue' : 'Verify code'}
                 </button>
               </form>
 
@@ -335,47 +364,16 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               </p>
 
               <button
-                onClick={() => switchTab(pending.purpose === 'verify' ? 'signup' : 'login')}
+                onClick={() => pending.purpose === 'reset'
+                  ? (setView('forgot'), setError(''), setNotice(''))
+                  : switchTab(pending.purpose === 'verify' ? 'signup' : 'login')}
                 className="w-full flex items-center justify-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors pt-1"
               >
                 <ArrowLeft size={14} weight="bold" />
-                {pending.purpose === 'verify' ? 'Use a different email' : 'Back to Log in'}
+                {pending.purpose === 'login' ? 'Back to Log in' : 'Use a different email'}
               </button>
             </div>
           </>
-        )}
-
-        {/* ── FORGOT-SENT view — confirmation that reset email was sent ─────── */}
-        {view === 'forgot-sent' && (
-          <div className="p-10 flex flex-col items-center text-center">
-            {/* Paper plane icon signals "email sent" */}
-            <div className="w-16 h-16 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
-              <PaperPlaneTilt size={30} weight="duotone" className="text-brand-600" />
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Check your inbox</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-              We sent a password reset link to
-            </p>
-            {/* Shows the email address they submitted */}
-            <p className="text-sm font-semibold text-brand-600 dark:text-brand-400 mb-6 break-all">
-              {resetEmail}
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mb-6">
-              Didn't receive it? Check your spam folder or{' '}
-              <button
-                onClick={() => { setView('forgot'); setLoading(false) }}
-                className="text-brand-600 dark:text-brand-400 hover:underline"
-              >
-                try again
-              </button>.
-            </p>
-            <button
-              onClick={() => switchTab('login')}
-              className="btn-outline px-8 py-2.5"
-            >
-              Back to Log in
-            </button>
-          </div>
         )}
 
         {/* ── FORGOT view — email input form for password reset ─────────────── */}
@@ -388,7 +386,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               </div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Reset your password</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Enter the email linked to your account and we'll send you a reset link.
+                Enter the email linked to your account and we'll send you a 6-digit code.
               </p>
             </div>
 
@@ -409,7 +407,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   />
                 </div>
 
-                {/* Send reset link button */}
+                {/* Send code button */}
                 <button
                   type="submit"
                   disabled={loading}
@@ -421,9 +419,9 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                       </svg>
-                      Sending link…
+                      Sending code…
                     </span>
-                  ) : 'Send reset link'}
+                  ) : 'Send code'}
                 </button>
               </form>
 

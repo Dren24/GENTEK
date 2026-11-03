@@ -3,9 +3,10 @@
 # Passwords are hashed with bcrypt — never stored or returned in plain text.
 # Protected routes require a valid JWT Bearer token (issued at login/register).
 
-from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Request, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import update, delete
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 import bcrypt
@@ -15,6 +16,8 @@ import smtplib
 import os
 import requests
 import threading
+import time
+from collections import defaultdict, deque
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
@@ -140,14 +143,18 @@ class GoogleAuthRequest(BaseModel):
     remember: bool = True
 
 
-# ── Email verification config ─────────────────────────────────────────────────
-CODE_TTL_MINUTES       = 10
+# ── Email OTP config ──────────────────────────────────────────────────────────
+CODE_TTL_MINUTES       = 5
 CODE_MAX_ATTEMPTS      = 5     # wrong guesses before the code is burned
 CODE_RESEND_SECONDS    = 60
 TRUSTED_DEVICE_DAYS    = 30
-CODE_PURPOSES          = {"verify", "login"}
+RESET_TOKEN_MINUTES    = 10    # window to choose a new password after a correct reset code
+PENDING_SIGNUP_DAYS    = 7     # unverified sign-ups older than this are removed
+# 'verify' = sign-up, 'login' = login from a new browser, 'reset' = forgot password
+CODE_PURPOSES          = {"verify", "login", "reset"}
 # Local dev (SQLite, no DATABASE_URL) also prints codes to the server log, so
-# seeded test accounts with undeliverable addresses can still log in.
+# seeded test accounts with undeliverable addresses can still log in. Never
+# in production: codes are only ever delivered by email there.
 _DEV_MODE = not os.getenv("DATABASE_URL")
 # The seeded local test account (see main.py) skips emailed codes — its
 # address can't receive mail. Only in local dev; never with a real database.
@@ -156,6 +163,63 @@ DEV_TEST_EMAIL = "premiumtest@gentek.local"
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+# Sliding-window counters per email and per client IP, in process memory.
+# GENTEK runs as a single instance on Render, so this covers every request;
+# with several instances each would keep its own counts. Limits are on top of
+# the per-code attempt cap and resend cooldown.
+class _RateLimiter:
+    def __init__(self):
+        self._hits = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def hit(self, key: str, limit: int, window_seconds: int) -> Optional[int]:
+        """Records one hit; returns seconds to wait if over the limit, else None."""
+        now = time.time()
+        with self._lock:
+            q = self._hits[key]
+            while q and q[0] <= now - window_seconds:
+                q.popleft()
+            if len(q) >= limit:
+                return int(q[0] + window_seconds - now) + 1
+            q.append(now)
+            return None
+
+    def reset(self):
+        with self._lock:
+            self._hits.clear()
+
+
+_limiter = _RateLimiter()
+# (limit, window seconds)
+_LIMITS = {
+    "send:email":   (5, 30 * 60),    # code emails to one address
+    "send:ip":      (20, 30 * 60),   # code emails triggered from one IP
+    "verify:email": (15, 15 * 60),   # code guesses for one address (across codes)
+    "verify:ip":    (40, 15 * 60),   # code guesses from one IP
+    "login:ip":     (30, 15 * 60),   # password attempts from one IP
+    "cooldown":     (1, CODE_RESEND_SECONDS),  # one code request per address+purpose
+}
+
+
+def _client_ip(request: Request) -> str:
+    # Behind Render's proxy the client address is in X-Forwarded-For; the
+    # right-most entry is the one the proxy itself appended.
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit(kind: str, value: str):
+    limit, window = _LIMITS[kind]
+    wait = _limiter.hit(f"{kind}:{value.lower()}", limit, window)
+    if wait is not None:
+        if kind == "cooldown":
+            raise HTTPException(status_code=429, detail=f"Please wait {wait}s before requesting a new code.")
+        raise HTTPException(status_code=429, detail=f"Too many attempts. Please try again in {max(1, round(wait / 60))} minute(s).")
 
 
 def _user_payload(user: User, db: Session, remember: bool, new_device: bool = False) -> dict:
@@ -187,10 +251,36 @@ def _is_trusted_device(user: User, device_token: Optional[str], db: Session) -> 
     return bool(device and device.expires_at > datetime.utcnow())
 
 
-def _issue_code(user: User, purpose: str, db: Session) -> dict:
-    """Replaces any pending code for this purpose, emails a new one, and returns
-    the 'code required' response. Raises 503 if the email can't be sent."""
-    db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == purpose).delete()
+def _cleanup_expired(db: Session):
+    """Removes expired codes, reset tokens and device trusts, and sign-ups that
+    were never verified within PENDING_SIGNUP_DAYS (they can't have history)."""
+    now = datetime.utcnow()
+    db.execute(delete(EmailCode).where(EmailCode.expires_at < now))
+    db.execute(delete(PasswordResetToken).where(PasswordResetToken.expires_at < now))
+    db.execute(delete(TrustedDevice).where(TrustedDevice.expires_at < now))
+    stale = [u.id for u in db.query(User.id).filter(
+        User.email_verified == 0, User.created_at < now - timedelta(days=PENDING_SIGNUP_DAYS)).all()]
+    if stale:
+        for model in (EmailCode, TrustedDevice, PasswordResetToken):
+            db.execute(delete(model).where(model.user_id.in_(stale)))
+        db.execute(delete(User).where(User.id.in_(stale)))
+    db.commit()
+
+
+def _smtp_configured() -> bool:
+    return bool(os.getenv("GMAIL_USER", "").strip() and os.getenv("GMAIL_APP_PASSWORD", "").strip())
+
+
+def _issue_code(user: User, purpose: str, db: Session, ip: str) -> dict:
+    """Replaces any pending code for this purpose (the old one stops working),
+    emails a new one, and returns the 'code required' response. Raises 429 when
+    rate-limited and 503 if the email can't be sent."""
+    _rate_limit("send:email", user.email)
+    _rate_limit("send:ip", ip)
+    _cleanup_expired(db)
+    # The old code (if any) stops working; "fetch" also drops it from this session.
+    db.execute(delete(EmailCode).where(EmailCode.user_id == user.id, EmailCode.purpose == purpose)
+               .execution_options(synchronize_session="fetch"))
     code = f"{secrets.randbelow(1_000_000):06d}"
     db.add(EmailCode(
         user_id=user.id, purpose=purpose, code_hash=_sha256(code),
@@ -202,11 +292,58 @@ def _issue_code(user: User, purpose: str, db: Session) -> dict:
     try:
         sent = send_code_email(user.email, user.name, code, purpose)
     except Exception as e:
+        # Exception text from smtplib carries the server reply, never the
+        # credentials; the code itself is not logged.
         print(f"[auth] failed to send {purpose} code to {user.email}: {type(e).__name__}: {e}", flush=True)
         sent = False
     if not sent and not _DEV_MODE:
-        raise HTTPException(status_code=503, detail="Could not send the verification email. Please try again later.")
+        db.execute(delete(EmailCode).where(EmailCode.user_id == user.id, EmailCode.purpose == purpose))
+        db.commit()
+        raise HTTPException(status_code=503, detail="We couldn't send the verification email. Please try again in a few minutes.")
     return {"verification_required": True, "purpose": purpose, "email": user.email}
+
+
+def _code_flow(user: User, purpose: str, db: Session, ip: str) -> dict:
+    """For a sign-up or login: if a code for this purpose was sent less than
+    CODE_RESEND_SECONDS ago and is still valid, reuse it (a double-click or a
+    retried login shouldn't send another email); otherwise issue a new one."""
+    pending = db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == purpose).first()
+    now = datetime.utcnow()
+    if (pending and pending.expires_at > now and pending.attempts < CODE_MAX_ATTEMPTS
+            and (now - pending.created_at).total_seconds() < CODE_RESEND_SECONDS):
+        return {"verification_required": True, "purpose": purpose, "email": user.email}
+    return _issue_code(user, purpose, db, ip)
+
+
+def _consume_code(user: User, purpose: str, code: str, db: Session, ip: str):
+    """Checks an emailed code and, if right, deletes it so it can't be used
+    again. Every step is a single conditional UPDATE/DELETE, so two requests
+    racing with the same code can't both succeed and concurrent wrong guesses
+    can't exceed CODE_MAX_ATTEMPTS. Raises 400/429 on failure."""
+    _rate_limit("verify:email", user.email)
+    _rate_limit("verify:ip", ip)
+    invalid = HTTPException(status_code=400, detail="Invalid or expired code. Request a new one.")
+    now = datetime.utcnow()
+    record = db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == purpose).first()
+    if not record or record.expires_at < now or record.attempts >= CODE_MAX_ATTEMPTS:
+        raise invalid
+    if secrets.compare_digest(record.code_hash, _sha256(code.strip())):
+        consumed = db.execute(delete(EmailCode).where(
+            EmailCode.id == record.id, EmailCode.attempts < CODE_MAX_ATTEMPTS)).rowcount
+        db.commit()
+        if consumed != 1:
+            raise invalid  # another request used (or burned) it first
+        return
+    db.execute(update(EmailCode).where(EmailCode.id == record.id)
+               .values(attempts=EmailCode.attempts + 1))
+    db.commit()
+    db.refresh(record)
+    if record.attempts >= CODE_MAX_ATTEMPTS:
+        db.execute(delete(EmailCode).where(EmailCode.id == record.id))
+        db.commit()
+        raise HTTPException(status_code=400, detail="Too many wrong attempts. Request a new code.")
+    left = CODE_MAX_ATTEMPTS - record.attempts
+    raise HTTPException(status_code=400, detail=f"Incorrect code. {left} attempt{'s' if left != 1 else ''} left.")
 
 
 # ── Analysis create payload ───────────────────────────────────────────────────
@@ -239,7 +376,9 @@ def verify_password(password: str, hashed: str) -> bool:
 # Returns the new user's id, name, and email (no password).
 # 400 if the email is already registered.
 @router.post("/register")
-def register(req: RegisterRequest, db: Session = Depends(get_db)):
+def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     user = db.query(User).filter(User.email == req.email).first()
@@ -261,13 +400,15 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     # No session until the emailed code is confirmed via /auth/verify-code.
-    return _issue_code(user, "verify", db)
+    return _code_flow(user, "verify", db, _client_ip(request))
 
 
 # ── POST /auth/login — verify credentials and return user ────────────────────
 # 401 on wrong email or password (single generic message to avoid user enumeration).
 @router.post("/login")
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    ip = _client_ip(request)
+    _rate_limit("login:ip", ip)
     user = db.query(User).filter(User.email == req.email).first()
     if not user or not verify_password(req.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -276,57 +417,54 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if _DEV_MODE and user.email == DEV_TEST_EMAIL:
         return _user_payload(user, db, req.remember)
     if not user.email_verified:
-        return _issue_code(user, "verify", db)
+        return _code_flow(user, "verify", db, ip)
     # Browser not seen before (or trust expired) — confirm with an emailed code.
     if not _is_trusted_device(user, req.device_token, db):
-        return _issue_code(user, "login", db)
+        return _code_flow(user, "login", db, ip)
     return _user_payload(user, db, req.remember)
 
 
 # ── POST /auth/verify-code — confirm an emailed code, then log in ─────────────
 # Completes sign-up ('verify') or a new-browser login ('login'). Success also
-# trusts this browser for TRUSTED_DEVICE_DAYS. A code is burned after
-# CODE_MAX_ATTEMPTS wrong guesses, so 6 digits can't be brute-forced.
+# trusts this browser for TRUSTED_DEVICE_DAYS. Password-reset codes use
+# /auth/verify-reset-code instead, which never logs in.
 @router.post("/verify-code")
-def verify_code(req: VerifyCodeRequest, db: Session = Depends(get_db)):
-    invalid = HTTPException(status_code=400, detail="Invalid or expired code")
-    if req.purpose not in CODE_PURPOSES:
-        raise invalid
+def verify_code(req: VerifyCodeRequest, request: Request, db: Session = Depends(get_db)):
+    if req.purpose not in ("verify", "login"):
+        raise HTTPException(status_code=400, detail="Invalid or expired code. Request a new one.")
     user = db.query(User).filter(User.email == req.email).first()
     if not user:
-        raise invalid
-    record = db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == req.purpose).first()
-    if not record or record.expires_at < datetime.utcnow():
-        raise invalid
-    if not secrets.compare_digest(record.code_hash, _sha256(req.code.strip())):
-        record.attempts += 1
-        if record.attempts >= CODE_MAX_ATTEMPTS:
-            db.delete(record)
-            db.commit()
-            raise HTTPException(status_code=400, detail="Too many wrong attempts. Request a new code.")
-        db.commit()
-        raise HTTPException(status_code=400, detail="Incorrect code")
-    db.delete(record)
+        raise HTTPException(status_code=400, detail="Invalid or expired code. Request a new one.")
+    _consume_code(user, req.purpose, req.code, db, _client_ip(request))
     if req.purpose == "verify":
         user.email_verified = 1
-    db.commit()
+        db.commit()
     return _user_payload(user, db, req.remember, new_device=True)
 
 
 # ── POST /auth/resend-code — email a fresh code ───────────────────────────────
-# Only re-sends when a code for this purpose is already pending (i.e. sign-up
-# or a correct-password login happened), so it can't be used to spam an
-# address or to learn which emails are registered. Same reply either way.
+# Only re-sends when a code for this purpose is already pending (i.e. sign-up,
+# a correct-password login, or a forgot-password request happened), so it
+# can't be used to spam an address or learn which emails are registered: the
+# cooldown applies and the reply is the same whether or not the email exists.
 @router.post("/resend-code")
-def resend_code(req: ResendCodeRequest, db: Session = Depends(get_db)):
+def resend_code(req: ResendCodeRequest, request: Request, db: Session = Depends(get_db)):
+    if req.purpose not in CODE_PURPOSES:
+        raise HTTPException(status_code=400, detail="Unknown code type")
     user = db.query(User).filter(User.email == req.email).first()
-    if user and req.purpose in CODE_PURPOSES:
-        record = db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == req.purpose).first()
-        if record:
-            wait = CODE_RESEND_SECONDS - (datetime.utcnow() - record.created_at).total_seconds()
-            if wait > 0:
-                raise HTTPException(status_code=429, detail=f"Please wait {int(wait) + 1}s before requesting a new code.")
-            _issue_code(user, req.purpose, db)
+    pending = user and db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == req.purpose).first()
+    if pending:
+        # 60s since the current code was sent
+        wait = CODE_RESEND_SECONDS - (datetime.utcnow() - pending.created_at).total_seconds()
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=f"Please wait {int(wait) + 1}s before requesting a new code.")
+    else:
+        # No current code (or no such account): 60s between requests per address
+        _rate_limit("cooldown", f"{req.purpose}:{req.email}")
+    # A forgot-password code may have expired or been burned — still allow a
+    # new one, since that flow starts from just an email.
+    if user and (pending or req.purpose == "reset"):
+        _issue_code(user, req.purpose, db, _client_ip(request))
     return {"message": "If a code was pending, a new one has been sent."}
 
 
@@ -568,16 +706,19 @@ def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db
 
 
 # ── Email helpers — Gmail SMTP ────────────────────────────────────────────────
-def _send_email(to_email: str, subject: str, html: str) -> bool:
-    """Sends one HTML email. Returns False if SMTP isn't configured."""
+def _send_email(to_email: str, subject: str, html: str, text: str = "") -> bool:
+    """Sends one email over Gmail SMTP with TLS (port 465). Returns False if
+    SMTP isn't configured; raises on delivery errors."""
     gmail_user     = os.getenv("GMAIL_USER", "").strip()
     gmail_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
     if not gmail_user or not gmail_password:
         return False
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = gmail_user
+    msg["From"]    = f"GENTEK <{gmail_user}>"
     msg["To"]      = to_email
+    if text:
+        msg.attach(MIMEText(text, "plain"))  # plain first, HTML preferred by clients
     msg.attach(MIMEText(html, "html"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
         smtp.login(gmail_user, gmail_password)
@@ -585,114 +726,125 @@ def _send_email(to_email: str, subject: str, html: str) -> bool:
     return True
 
 
+_CODE_EMAILS = {
+    "verify": ("Your GENTEK verification code", "Verify your email",
+               "Use this code to finish creating your GENTEK account.",
+               "If you didn't sign up for GENTEK, you can ignore this email."),
+    "login":  ("Your GENTEK sign-in code", "Confirm it's you",
+               "Someone signed in to your GENTEK account from a new browser. Use this code to continue.",
+               "If this wasn't you, don't enter the code — change your GENTEK password."),
+    "reset":  ("Your GENTEK password reset code", "Reset your password",
+               "Use this code to reset your GENTEK password.",
+               "If you didn't ask to reset your password, ignore this email — your password stays the same."),
+}
+
+
 def send_code_email(to_email: str, to_name: str, code: str, purpose: str) -> bool:
-    if purpose == "verify":
-        subject, heading, intro = ("Verify your GENTEK email", "Confirm your email",
-                                   "Use this code to finish creating your GENTEK account.")
-    else:
-        subject, heading, intro = ("Your GENTEK sign-in code", "New sign-in",
-                                   "Someone (hopefully you) signed in to GENTEK from a new browser. Use this code to continue.")
+    subject, heading, intro, ignore = _CODE_EMAILS[purpose]
     html = f"""
-    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
-      <div style="text-align:center;margin-bottom:24px">
-        <span style="font-size:22px;font-weight:800;color:#0D9488">GENTEK</span>
+    <div style="background:#F8FAFC;padding:32px 12px;font-family:Arial,Helvetica,sans-serif">
+      <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;border-radius:16px;padding:32px 28px">
+        <div style="text-align:center;margin-bottom:24px">
+          <span style="font-size:22px;font-weight:800;color:#111827">GEN</span><span style="font-size:22px;font-weight:800;color:#0D9488">TEK</span>
+        </div>
+        <h2 style="font-size:20px;font-weight:700;color:#111827;margin:0 0 8px">{heading}</h2>
+        <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:0 0 20px">
+          Hi {escape(to_name)}, {intro}
+        </p>
+        <div style="font-size:34px;font-weight:800;letter-spacing:10px;color:#0D9488;text-align:center;
+                    background:#F0FDFA;border:1px solid #CCFBF1;border-radius:12px;padding:16px 0;margin-bottom:16px">{code}</div>
+        <p style="color:#4B5563;font-size:13px;line-height:1.6;margin:0 0 16px;text-align:center">
+          This code expires in <strong>{CODE_TTL_MINUTES} minutes</strong> and can be used once.
+        </p>
+        <p style="color:#9A3412;background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;font-size:12px;line-height:1.5;padding:10px 12px;margin:0 0 16px">
+          <strong>Never share this code.</strong> GENTEK will never ask you for it by phone, chat, or email.
+        </p>
+        <p style="color:#9CA3AF;font-size:12px;line-height:1.5;margin:0">{ignore}</p>
       </div>
-      <h2 style="font-size:20px;font-weight:700;color:#111;margin-bottom:8px">{heading}</h2>
-      <p style="color:#555;font-size:14px;line-height:1.6;margin-bottom:20px">
-        Hi {escape(to_name)}, {intro} It expires in <strong>{CODE_TTL_MINUTES} minutes</strong>.
-      </p>
-      <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#0D9488;text-align:center;
-                  background:#F0FDFA;border-radius:12px;padding:16px 0;margin-bottom:20px">{code}</div>
-      <p style="color:#999;font-size:12px">
-        If you didn't try to {"sign up" if purpose == "verify" else "sign in"}, ignore this email{"" if purpose == "verify" else " and consider changing your password"}.
-      </p>
     </div>
     """
-    return _send_email(to_email, subject, html)
+    text = (f"Hi {to_name}, {intro}\n\nYour code: {code}\n\nIt expires in {CODE_TTL_MINUTES} minutes and can be used once. "
+            f"Never share this code.\n\n{ignore}\n\n— GENTEK")
+    return _send_email(to_email, subject, html, text)
 
 
-def send_reset_email(to_email: str, to_name: str, reset_url: str):
-
-    html = f"""
-    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
-      <div style="text-align:center;margin-bottom:24px">
-        <span style="font-size:22px;font-weight:800;color:#0D9488">GENTEK</span>
-      </div>
-      <h2 style="font-size:20px;font-weight:700;color:#111;margin-bottom:8px">Reset your password</h2>
-      <p style="color:#555;font-size:14px;line-height:1.6;margin-bottom:24px">
-        Hi {to_name}, we received a request to reset your GENTEK password.
-        Click the button below — this link expires in <strong>1 hour</strong>.
-      </p>
-      <a href="{reset_url}"
-         style="display:inline-block;background:#0D9488;color:#fff;font-weight:700;
-                font-size:14px;padding:12px 28px;border-radius:12px;text-decoration:none">
-        Reset Password
-      </a>
-      <p style="color:#999;font-size:12px;margin-top:24px">
-        If you did not request this, you can safely ignore this email.
-      </p>
-    </div>
-    """
-
-    _send_email(to_email, "Reset your GENTEK password", html)
-
-
-# ── POST /auth/forgot-password — generate token and send reset email ──────────
-# Always returns 200 even if email not found (prevents user enumeration).
+# ── POST /auth/forgot-password — email a password-reset code ──────────────────
+# Same reply whether or not the email is registered (no account enumeration);
+# the 60s cooldown also applies to unknown emails for the same reason.
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: str
+
 
 @router.post("/forgot-password")
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email).first()
-    reset_url = None
+def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    email = req.email.strip()
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    if not _smtp_configured() and not _DEV_MODE:
+        raise HTTPException(status_code=503, detail="We couldn't send the verification email. Please try again in a few minutes.")
+    reply = {"message": "If that email is registered, a 6-digit code has been sent.", "email": email}
+    # Within the cooldown (e.g. a double-click), go on to the code step without
+    # sending again — known or unknown email alike.
+    limit, window = _LIMITS["cooldown"]
+    if _limiter.hit(f"cooldown:reset:{email.lower()}", limit, window) is not None:
+        return reply
+    user = db.query(User).filter(User.email == email).first()
     if user:
-        # Delete any existing tokens for this user before creating a new one
-        db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete()
-        token      = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=1)
-        db.add(PasswordResetToken(user_id=user.id, token=token, expires_at=expires_at))
-        db.commit()
-        app_url   = os.getenv("APP_URL", "http://localhost:5173").strip()
-        reset_url = f"{app_url}/reset-password?token={token}"
-        # On Vercel, a serverless function's execution can be frozen/killed as
-        # soon as the response is sent — a background thread isn't guaranteed
-        # to finish, so send synchronously there. Everywhere else (Docker,
-        # Railway, local dev) keep it backgrounded so the response isn't
-        # delayed by the SMTP round-trip.
-        if os.getenv("VERCEL"):
-            send_reset_email(user.email, user.name, reset_url)
-        else:
-            threading.Thread(
-                target=send_reset_email,
-                args=(user.email, user.name, reset_url),
-                daemon=True,
-            ).start()
-    # Never return reset_url — it would leak whether the email is registered
-    return {"message": "If that email exists, a reset link has been sent."}
+        _issue_code(user, "reset", db, _client_ip(request))
+    return reply
 
 
-# ── POST /auth/reset-password — validate token and update password ────────────
-# Token is required — the email-only path was removed because it allowed
-# unauthenticated password resets by anyone who knows a target email address.
+# ── POST /auth/verify-reset-code — trade a correct code for a reset token ─────
+# The token is the backend's own proof that the inbox was verified: random,
+# stored only as a hash, valid for RESET_TOKEN_MINUTES, usable once. The new
+# password is only accepted with it — never on frontend state alone.
+class VerifyResetCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+@router.post("/verify-reset-code")
+def verify_reset_code(req: VerifyResetCodeRequest, request: Request, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email.strip()).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired code. Request a new one.")
+    _consume_code(user, "reset", req.code, db, _client_ip(request))
+    db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+    token = secrets.token_urlsafe(32)
+    db.add(PasswordResetToken(user_id=user.id, token=_sha256(token),
+                              expires_at=datetime.utcnow() + timedelta(minutes=RESET_TOKEN_MINUTES)))
+    db.commit()
+    return {"reset_token": token, "expires_in_minutes": RESET_TOKEN_MINUTES}
+
+
+# ── POST /auth/reset-password — set a new password with a reset token ─────────
 class ResetPasswordRequest(BaseModel):
-    token:        str   # required — issued by /forgot-password
+    token:        str   # issued by /auth/verify-reset-code
     new_password: str
+
 
 @router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     if len(req.new_password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-    record = db.query(PasswordResetToken).filter(PasswordResetToken.token == req.token).first()
+    invalid = HTTPException(status_code=400, detail="This reset session has expired. Please request a new code.")
+    record = db.query(PasswordResetToken).filter(PasswordResetToken.token == _sha256(req.token)).first()
     if not record or record.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+        raise invalid
+    # Consume first, atomically — a token racing with itself succeeds once.
+    if db.execute(delete(PasswordResetToken).where(PasswordResetToken.id == record.id)).rowcount != 1:
+        db.rollback()
+        raise invalid
     user = db.query(User).filter(User.id == record.user_id).first()
-    # Always delete the used token, even if the user no longer exists
-    db.delete(record)
     if not user:
         db.commit()
-        raise HTTPException(status_code=404, detail="User not found")
+        raise invalid
     user.password = hash_password(req.new_password)
+    # Proving the inbox also confirms the address; the password changed, so
+    # browsers trusted under the old one must confirm again.
+    user.email_verified = 1
+    db.execute(delete(TrustedDevice).where(TrustedDevice.user_id == user.id))
+    db.execute(delete(EmailCode).where(EmailCode.user_id == user.id))
     db.commit()
     return {"message": "Password updated successfully"}
 
