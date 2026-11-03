@@ -27,6 +27,7 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN email_notifications INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN google_id VARCHAR(255)",
+        "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE password_reset_tokens ADD COLUMN id INTEGER",  # no-op guard
     ]:
         try:

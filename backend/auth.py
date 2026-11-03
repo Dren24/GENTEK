@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 import bcrypt
+import hashlib
 import secrets
 import smtplib
 import os
@@ -19,11 +20,12 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from typing import Optional
+from html import escape
 
 load_dotenv()
 
 from database import get_db
-from models import User, Analysis, PasswordResetToken
+from models import User, Analysis, PasswordResetToken, EmailCode, TrustedDevice
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -115,6 +117,19 @@ class LoginRequest(BaseModel):
     email: str
     password: str
     remember: bool = True   # False = short-lived token, paired with sessionStorage on the frontend
+    device_token: Optional[str] = None  # from a previous verified login on this browser
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+    purpose: str            # 'verify' (sign-up) | 'login' (new browser)
+    remember: bool = True
+
+
+class ResendCodeRequest(BaseModel):
+    email: str
+    purpose: str
 
 
 # ── Google Sign-In payload — the frontend sends only the opaque OAuth access
@@ -123,6 +138,72 @@ class LoginRequest(BaseModel):
 class GoogleAuthRequest(BaseModel):
     access_token: str
     remember: bool = True
+
+
+# ── Email verification config ─────────────────────────────────────────────────
+CODE_TTL_MINUTES       = 10
+CODE_MAX_ATTEMPTS      = 5     # wrong guesses before the code is burned
+CODE_RESEND_SECONDS    = 60
+TRUSTED_DEVICE_DAYS    = 30
+CODE_PURPOSES          = {"verify", "login"}
+# Local dev (SQLite, no DATABASE_URL) also prints codes to the server log, so
+# seeded test accounts with undeliverable addresses can still log in.
+_DEV_MODE = not os.getenv("DATABASE_URL")
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _user_payload(user: User, db: Session, remember: bool, new_device: bool = False) -> dict:
+    """The normal logged-in response. With new_device, also trusts this browser
+    for TRUSTED_DEVICE_DAYS and returns the token it should keep."""
+    payload = {
+        "id": user.id, "name": user.name, "email": user.email,
+        "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium),
+        "token": _create_token(user.id, user.name, user.email, remember=remember),
+    }
+    if new_device:
+        device_token = secrets.token_urlsafe(32)
+        db.add(TrustedDevice(
+            user_id=user.id, token_hash=_sha256(device_token),
+            expires_at=datetime.utcnow() + timedelta(days=TRUSTED_DEVICE_DAYS),
+        ))
+        db.commit()
+        payload["device_token"] = device_token
+    return payload
+
+
+def _is_trusted_device(user: User, device_token: Optional[str], db: Session) -> bool:
+    if not device_token:
+        return False
+    device = db.query(TrustedDevice).filter(
+        TrustedDevice.user_id == user.id,
+        TrustedDevice.token_hash == _sha256(device_token),
+    ).first()
+    return bool(device and device.expires_at > datetime.utcnow())
+
+
+def _issue_code(user: User, purpose: str, db: Session) -> dict:
+    """Replaces any pending code for this purpose, emails a new one, and returns
+    the 'code required' response. Raises 503 if the email can't be sent."""
+    db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == purpose).delete()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db.add(EmailCode(
+        user_id=user.id, purpose=purpose, code_hash=_sha256(code),
+        expires_at=datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES),
+    ))
+    db.commit()
+    if _DEV_MODE:
+        print(f"[auth] DEV: {purpose} code for {user.email}: {code}", flush=True)
+    try:
+        sent = send_code_email(user.email, user.name, code, purpose)
+    except Exception as e:
+        print(f"[auth] failed to send {purpose} code to {user.email}: {type(e).__name__}: {e}", flush=True)
+        sent = False
+    if not sent and not _DEV_MODE:
+        raise HTTPException(status_code=503, detail="Could not send the verification email. Please try again later.")
+    return {"verification_required": True, "purpose": purpose, "email": user.email}
 
 
 # ── Analysis create payload ───────────────────────────────────────────────────
@@ -158,18 +239,26 @@ def verify_password(password: str, hashed: str) -> bool:
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-    if db.query(User).filter(User.email == req.email).first():
+    user = db.query(User).filter(User.email == req.email).first()
+    if user and user.email_verified:
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(
-        name=req.name,
-        email=req.email,
-        password=hash_password(req.password),
-    )
-    db.add(user)
+    if user:
+        # Sign-up was started but never verified (e.g. a typo'd or abandoned
+        # attempt) — let it be redone instead of locking the address forever.
+        user.name = req.name
+        user.password = hash_password(req.password)
+    else:
+        user = User(
+            name=req.name,
+            email=req.email,
+            password=hash_password(req.password),
+            email_verified=0,
+        )
+        db.add(user)
     db.commit()
     db.refresh(user)
-    token = _create_token(user.id, user.name, user.email)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium), "token": token}
+    # No session until the emailed code is confirmed via /auth/verify-code.
+    return _issue_code(user, "verify", db)
 
 
 # ── POST /auth/login — verify credentials and return user ────────────────────
@@ -179,8 +268,61 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == req.email).first()
     if not user or not verify_password(req.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    token = _create_token(user.id, user.name, user.email, remember=req.remember)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium), "token": token}
+    # Correct password, but the address was never confirmed — send a new
+    # sign-up code instead of a session.
+    if not user.email_verified:
+        return _issue_code(user, "verify", db)
+    # Browser not seen before (or trust expired) — confirm with an emailed code.
+    if not _is_trusted_device(user, req.device_token, db):
+        return _issue_code(user, "login", db)
+    return _user_payload(user, db, req.remember)
+
+
+# ── POST /auth/verify-code — confirm an emailed code, then log in ─────────────
+# Completes sign-up ('verify') or a new-browser login ('login'). Success also
+# trusts this browser for TRUSTED_DEVICE_DAYS. A code is burned after
+# CODE_MAX_ATTEMPTS wrong guesses, so 6 digits can't be brute-forced.
+@router.post("/verify-code")
+def verify_code(req: VerifyCodeRequest, db: Session = Depends(get_db)):
+    invalid = HTTPException(status_code=400, detail="Invalid or expired code")
+    if req.purpose not in CODE_PURPOSES:
+        raise invalid
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user:
+        raise invalid
+    record = db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == req.purpose).first()
+    if not record or record.expires_at < datetime.utcnow():
+        raise invalid
+    if not secrets.compare_digest(record.code_hash, _sha256(req.code.strip())):
+        record.attempts += 1
+        if record.attempts >= CODE_MAX_ATTEMPTS:
+            db.delete(record)
+            db.commit()
+            raise HTTPException(status_code=400, detail="Too many wrong attempts. Request a new code.")
+        db.commit()
+        raise HTTPException(status_code=400, detail="Incorrect code")
+    db.delete(record)
+    if req.purpose == "verify":
+        user.email_verified = 1
+    db.commit()
+    return _user_payload(user, db, req.remember, new_device=True)
+
+
+# ── POST /auth/resend-code — email a fresh code ───────────────────────────────
+# Only re-sends when a code for this purpose is already pending (i.e. sign-up
+# or a correct-password login happened), so it can't be used to spam an
+# address or to learn which emails are registered. Same reply either way.
+@router.post("/resend-code")
+def resend_code(req: ResendCodeRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    if user and req.purpose in CODE_PURPOSES:
+        record = db.query(EmailCode).filter(EmailCode.user_id == user.id, EmailCode.purpose == req.purpose).first()
+        if record:
+            wait = CODE_RESEND_SECONDS - (datetime.utcnow() - record.created_at).total_seconds()
+            if wait > 0:
+                raise HTTPException(status_code=429, detail=f"Please wait {int(wait) + 1}s before requesting a new code.")
+            _issue_code(user, req.purpose, db)
+    return {"message": "If a code was pending, a new one has been sent."}
 
 
 # ── POST /auth/google — verify a Google OAuth access token and log in/register ──
@@ -250,8 +392,13 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    token = _create_token(user.id, user.name, user.email, remember=req.remember)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium), "token": token}
+    # Google has verified this address, and Google sign-in is itself a strong
+    # login — no emailed code needed; trust this browser for password logins too.
+    if not user.email_verified:
+        user.email_verified = 1
+        db.query(EmailCode).filter(EmailCode.user_id == user.id).delete()
+        db.commit()
+    return _user_payload(user, db, req.remember, new_device=True)
 
 
 # ── Update name schema — narrower than RegisterRequest (no password field) ────
@@ -355,6 +502,8 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: dict 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    for model in (EmailCode, TrustedDevice, PasswordResetToken):
+        db.query(model).filter(model.user_id == user_id).delete()
     db.delete(user)
     db.commit()
     return {"message": "Account deleted"}
@@ -413,12 +562,51 @@ def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db
     return {"message": "Deleted"}
 
 
-# ── Email helper — sends password reset link via Gmail SMTP ──────────────────
-def send_reset_email(to_email: str, to_name: str, reset_url: str):
+# ── Email helpers — Gmail SMTP ────────────────────────────────────────────────
+def _send_email(to_email: str, subject: str, html: str) -> bool:
+    """Sends one HTML email. Returns False if SMTP isn't configured."""
     gmail_user     = os.getenv("GMAIL_USER", "").strip()
     gmail_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
     if not gmail_user or not gmail_password:
-        return  # silently skip if not configured
+        return False
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = gmail_user
+    msg["To"]      = to_email
+    msg.attach(MIMEText(html, "html"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
+        smtp.login(gmail_user, gmail_password)
+        smtp.sendmail(gmail_user, to_email, msg.as_string())
+    return True
+
+
+def send_code_email(to_email: str, to_name: str, code: str, purpose: str) -> bool:
+    if purpose == "verify":
+        subject, heading, intro = ("Verify your GENTEK email", "Confirm your email",
+                                   "Use this code to finish creating your GENTEK account.")
+    else:
+        subject, heading, intro = ("Your GENTEK sign-in code", "New sign-in",
+                                   "Someone (hopefully you) signed in to GENTEK from a new browser. Use this code to continue.")
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
+      <div style="text-align:center;margin-bottom:24px">
+        <span style="font-size:22px;font-weight:800;color:#0D9488">GENTEK</span>
+      </div>
+      <h2 style="font-size:20px;font-weight:700;color:#111;margin-bottom:8px">{heading}</h2>
+      <p style="color:#555;font-size:14px;line-height:1.6;margin-bottom:20px">
+        Hi {escape(to_name)}, {intro} It expires in <strong>{CODE_TTL_MINUTES} minutes</strong>.
+      </p>
+      <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#0D9488;text-align:center;
+                  background:#F0FDFA;border-radius:12px;padding:16px 0;margin-bottom:20px">{code}</div>
+      <p style="color:#999;font-size:12px">
+        If you didn't try to {"sign up" if purpose == "verify" else "sign in"}, ignore this email{"" if purpose == "verify" else " and consider changing your password"}.
+      </p>
+    </div>
+    """
+    return _send_email(to_email, subject, html)
+
+
+def send_reset_email(to_email: str, to_name: str, reset_url: str):
 
     html = f"""
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px">
@@ -441,15 +629,7 @@ def send_reset_email(to_email: str, to_name: str, reset_url: str):
     </div>
     """
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Reset your GENTEK password"
-    msg["From"]    = gmail_user
-    msg["To"]      = to_email
-    msg.attach(MIMEText(html, "html"))
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
-        smtp.login(gmail_user, gmail_password)
-        smtp.sendmail(gmail_user, to_email, msg.as_string())
+    _send_email(to_email, "Reset your GENTEK password", html)
 
 
 # ── POST /auth/forgot-password — generate token and send reset email ──────────

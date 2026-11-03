@@ -101,6 +101,23 @@ export function AuthProvider({ children }) {
       .catch(() => {})
   }, [user?.id])
 
+  // ── Trusted-device token — proves this browser completed an emailed code,
+  // so password logins here skip the code for 30 days. Per browser, not per
+  // session, so it survives logout. ──────────────────────────────────────────
+  const getDeviceToken = () => { try { return localStorage.getItem('gentek-device') } catch { return null } }
+  const saveDeviceToken = (t) => { if (t) { try { localStorage.setItem('gentek-device', t) } catch {} } }
+
+  // ── startSession — store a logged-in response (token + profile) ───────────
+  const startSession = (data, remember) => {
+    const { token: t, device_token, ...u } = data
+    saveDeviceToken(device_token)
+    setUser(u)
+    setToken(t)
+    setRememberMe(remember)
+    persistSession(u, t, remember)
+    return u
+  }
+
   // ── login — POST /auth/login. `remember` decides localStorage (survives
   // closing the browser) vs sessionStorage (cleared when the tab/browser
   // closes) — the password itself is never stored client-side either way. ──
@@ -108,19 +125,45 @@ export function AuthProvider({ children }) {
     const res = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, remember }),
+      body: JSON.stringify({ email, password, remember, device_token: getDeviceToken() }),
     })
     if (!res.ok) {
       const err = await res.json()
       throw new Error(err.detail || 'Login failed')
     }
     const data = await res.json()
-    const { token: t, ...u } = data
-    setUser(u)
-    setToken(t)
-    setRememberMe(remember)
-    persistSession(u, t, remember)
-    return u
+    // Unverified account or a new browser — an emailed code is needed first.
+    // Caller shows the code step and finishes with verifyCode().
+    if (data.verification_required) return { pending: { email: data.email, purpose: data.purpose } }
+    return startSession(data, remember)
+  }
+
+  // ── verifyCode — POST /auth/verify-code; completes sign-up or a
+  // new-browser login and starts the session ─────────────────────────────────
+  const verifyCode = async (email, code, purpose, remember = true) => {
+    const res = await fetch('/auth/verify-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code, purpose, remember }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Verification failed')
+    }
+    return startSession(await res.json(), remember)
+  }
+
+  // ── resendCode — POST /auth/resend-code ───────────────────────────────────
+  const resendCode = async (email, purpose) => {
+    const res = await fetch('/auth/resend-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, purpose }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || 'Could not resend the code')
+    }
   }
 
   // ── loginWithGoogle — POST /auth/google with the OAuth access token from
@@ -137,16 +180,11 @@ export function AuthProvider({ children }) {
       const err = await res.json().catch(() => ({}))
       throw new Error(err.detail || 'Google sign-in failed')
     }
-    const data = await res.json()
-    const { token: t, ...u } = data
-    setUser(u)
-    setToken(t)
-    setRememberMe(remember)
-    persistSession(u, t, remember)
-    return u
+    return startSession(await res.json(), remember)
   }
 
-  // ── register — POST /auth/register, auto-login after success ─────────────
+  // ── register — POST /auth/register. No session yet: returns the pending
+  // verification; the session starts once verifyCode() succeeds. ────────────
   const register = async (name, email, password) => {
     const res = await fetch('/auth/register', {
       method: 'POST',
@@ -158,12 +196,7 @@ export function AuthProvider({ children }) {
       throw new Error(err.detail || 'Registration failed')
     }
     const data = await res.json()
-    const { token: t, ...u } = data
-    setUser(u)
-    setToken(t)
-    setRememberMe(true)
-    persistSession(u, t, true)
-    return u
+    return { pending: { email: data.email, purpose: data.purpose } }
   }
 
   // ── logout — clear user, token, and history from memory and both storages ──
@@ -306,7 +339,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, authHeader, login, loginWithGoogle, register, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
+      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,

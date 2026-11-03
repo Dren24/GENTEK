@@ -1,11 +1,11 @@
 // ── AuthModal — login / signup / forgot password modal ───────────────────────
 // Opened by Navbar's "Log in" or "Sign up" buttons and the homepage CTA.
-// Four internal views: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
+// Internal views: 'login' | 'signup' | 'verify' | 'forgot' | 'forgot-sent' | 'done'
 // Pressing Escape or clicking outside closes the modal.
 
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, PaperPlaneTilt } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, PaperPlaneTilt, ShieldCheck } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
 
@@ -26,9 +26,12 @@ function GoogleIcon() {
   )
 }
 
-// view: 'login' | 'signup' | 'forgot' | 'forgot-sent' | 'done'
+// ── Seconds before "Resend code" is allowed — matches CODE_RESEND_SECONDS on the backend
+const RESEND_SECONDS = 60
+
+// view: 'login' | 'signup' | 'verify' | 'forgot' | 'forgot-sent' | 'done'
 export default function AuthModal({ mode = 'signup', onClose }) {
-  const { login, register, loginWithGoogle } = useAuth()
+  const { login, register, loginWithGoogle, verifyCode, resendCode } = useAuth()
   const navigate                = useNavigate()
   const [view, setView]         = useState(mode)
   const [showPass, setShowPass] = useState(false)
@@ -37,6 +40,11 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [form, setForm]         = useState({ name: '', email: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
   const [remember, setRemember] = useState(true)
+  // ── Emailed-code step: { email, purpose: 'verify' | 'login' } ────────────
+  const [pending, setPending]   = useState(null)
+  const [code, setCode]         = useState('')
+  const [resendIn, setResendIn] = useState(0)
+  const [notice, setNotice]     = useState('')
   const googleClientRef = useRef(null)
   const rememberRef     = useRef(true)
 
@@ -50,6 +58,13 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
+
+  // ── Resend countdown — ticks once a second while on the code step ───────
+  useEffect(() => {
+    if (resendIn <= 0) return
+    const t = setTimeout(() => setResendIn(n => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendIn])
 
   // ── Lock body scroll while modal is open ──────────────────────────────────
   useEffect(() => {
@@ -119,16 +134,54 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     setLoading(true)
     setError('')
     try {
-      if (view === 'signup') {
-        await register(form.name, form.email, form.password)
-      } else {
-        await login(form.email, form.password, remember)
+      const result = view === 'signup'
+        ? await register(form.name, form.email, form.password)
+        : await login(form.email, form.password, remember)
+      if (result?.pending) {
+        // Sign-up, or a login from a new browser — an emailed code is needed
+        setPending(result.pending)
+        setCode('')
+        setNotice('')
+        setResendIn(RESEND_SECONDS)
+        setView('verify')
+        return
       }
-      onClose()   // close modal immediately on success
+      onClose()   // trusted browser — logged in directly
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // ── handleVerify — submits the emailed 6-digit code ──────────────────────
+  const handleVerify = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    try {
+      await verifyCode(pending.email, code, pending.purpose, remember)
+      onClose()
+    } catch (err) {
+      setError(err.message)
+      // A burned code can't be retried — clear the box so they request a new one
+      if (/too many/i.test(err.message)) { setCode(''); setResendIn(0) }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ── handleResend — emails a fresh code (backend enforces the cooldown too) ──
+  const handleResend = async () => {
+    setError('')
+    setNotice('')
+    try {
+      await resendCode(pending.email, pending.purpose)
+      setCode('')
+      setNotice('A new code has been sent.')
+      setResendIn(RESEND_SECONDS)
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -168,6 +221,9 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     setError('')
     setForm({ name: '', email: '', password: '' })
     setRemember(true)
+    setPending(null)
+    setCode('')
+    setNotice('')
   }
 
   // ── Shared input class — used for all text/email/password fields ──────────
@@ -208,6 +264,85 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               Go to Workspace
             </button>
           </div>
+        )}
+
+        {/* ── VERIFY view — enter the 6-digit code emailed at sign-up or on a
+            login from a new browser ─────────────────────────────────────── */}
+        {view === 'verify' && pending && (
+          <>
+            <div className="px-8 pt-8 pb-5 text-center">
+              <div className="flex justify-center mb-4">
+                <div className="w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
+                  <ShieldCheck size={28} weight="duotone" className="text-brand-600" />
+                </div>
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
+                {pending.purpose === 'verify' ? 'Verify your email' : 'Confirm it\'s you'}
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {pending.purpose === 'verify'
+                  ? 'Enter the 6-digit code we sent to'
+                  : 'This browser is new to your account. Enter the 6-digit code we sent to'}
+              </p>
+              <p className="text-sm font-semibold text-brand-600 dark:text-brand-400 break-all mt-0.5">{pending.email}</p>
+            </div>
+
+            <div className="px-8 pb-8 space-y-4">
+              <form onSubmit={handleVerify} className="space-y-3">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setError('') }}
+                  required
+                  autoFocus
+                  aria-label="6-digit code"
+                  className="w-full py-3 text-center text-2xl font-bold tracking-[0.5em] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
+                />
+
+                {error && (
+                  <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">
+                    {error}
+                  </p>
+                )}
+                {notice && !error && (
+                  <p className="text-xs text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-xl px-3 py-2 text-center">
+                    {notice}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading || code.length !== 6}
+                  className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Verifying…' : pending.purpose === 'verify' ? 'Verify and continue' : 'Continue'}
+                </button>
+              </form>
+
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                Didn't get it? Check your spam folder or{' '}
+                {resendIn > 0 ? (
+                  <span className="text-gray-400 dark:text-gray-500">resend in {resendIn}s</span>
+                ) : (
+                  <button type="button" onClick={handleResend} className="text-brand-600 dark:text-brand-400 hover:underline">
+                    resend the code
+                  </button>
+                )}.
+              </p>
+
+              <button
+                onClick={() => switchTab(pending.purpose === 'verify' ? 'signup' : 'login')}
+                className="w-full flex items-center justify-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors pt-1"
+              >
+                <ArrowLeft size={14} weight="bold" />
+                {pending.purpose === 'verify' ? 'Use a different email' : 'Back to Log in'}
+              </button>
+            </div>
+          </>
         )}
 
         {/* ── FORGOT-SENT view — confirmation that reset email was sent ─────── */}

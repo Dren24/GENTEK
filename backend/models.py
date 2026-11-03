@@ -20,6 +20,10 @@ class User(Base):
     email_notifications  = Column(Integer, default=1, server_default='1', nullable=False)
     is_premium           = Column(Integer, default=0, server_default='0', nullable=False)  # 0 = Free plan, 1 = Premium/Pro
     google_id            = Column(String(255), unique=True, nullable=True, index=True)  # Google 'sub' claim, if linked
+    # 1 once the owner proved the address (emailed code or Google). Defaults to
+    # 1 so accounts created before verification existed aren't locked out;
+    # /auth/register explicitly creates new accounts with 0.
+    email_verified       = Column(Integer, default=1, server_default='1', nullable=False)
     created_at           = Column(DateTime, default=datetime.utcnow)
 
     # ── Relationship: one user → many analyses (cascade delete) ───────────────
@@ -57,3 +61,32 @@ class PasswordResetToken(Base):
     expires_at = Column(DateTime, nullable=False)
 
     user = relationship("User")
+
+
+# ── EmailCode table ───────────────────────────────────────────────────────────
+# Short-lived 6-digit codes emailed to confirm an address at sign-up
+# (purpose 'verify') or a login from a browser not seen before ('login').
+# Only a SHA-256 hash of the code is stored. One active code per user+purpose.
+class EmailCode(Base):
+    __tablename__ = "email_codes"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    purpose    = Column(String(20), nullable=False)
+    code_hash  = Column(String(64), nullable=False)
+    attempts   = Column(Integer, default=0, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# ── TrustedDevice table ───────────────────────────────────────────────────────
+# A browser that completed an emailed code. It holds a random token (only its
+# hash is stored here) and skips the login code until expires_at.
+class TrustedDevice(Base):
+    __tablename__ = "trusted_devices"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
