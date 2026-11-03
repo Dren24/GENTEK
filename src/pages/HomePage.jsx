@@ -514,7 +514,7 @@ export default function HomePage() {
   // ── analyze — calls /analyze API, falls back to client runAnalysis on error ──
   // ── analyzeText — core analysis logic, accepts text directly ────────────
   const analyzeText = useCallback(async (inputText) => {
-    if (!inputText.trim() || inputText.trim().split(/\s+/).length < 3) return
+    if (!inputText.trim()) return
 
     // ── Guest limit: 2 free analyses. Third attempt → show login popup ─────
     if (!user && guestAnalysisCountRef.current >= 2) {
@@ -957,7 +957,7 @@ export default function HomePage() {
                       {/* Analyze button — primary CTA, disabled while analyzing */}
                       <button
                         onClick={analyze}
-                        disabled={!text.trim() || analyzing || wordCount < 3}
+                        disabled={!text.trim() || analyzing}
                         className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm px-6 py-2 rounded-xl shadow-btn hover:shadow-none active:scale-95 transition-all"
                       >
                         {analyzing
