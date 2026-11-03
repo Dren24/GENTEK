@@ -149,6 +149,9 @@ CODE_PURPOSES          = {"verify", "login"}
 # Local dev (SQLite, no DATABASE_URL) also prints codes to the server log, so
 # seeded test accounts with undeliverable addresses can still log in.
 _DEV_MODE = not os.getenv("DATABASE_URL")
+# The seeded local test account (see main.py) skips emailed codes — its
+# address can't receive mail. Only in local dev; never with a real database.
+DEV_TEST_EMAIL = "premiumtest@gentek.local"
 
 
 def _sha256(value: str) -> str:
@@ -270,6 +273,8 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     # Correct password, but the address was never confirmed — send a new
     # sign-up code instead of a session.
+    if _DEV_MODE and user.email == DEV_TEST_EMAIL:
+        return _user_payload(user, db, req.remember)
     if not user.email_verified:
         return _issue_code(user, "verify", db)
     # Browser not seen before (or trust expired) — confirm with an emailed code.

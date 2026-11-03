@@ -44,10 +44,10 @@ with engine.connect() as _conn:
 if not os.getenv("DATABASE_URL"):
     _seed_db = SessionLocal()
     try:
-        if not _seed_db.query(User).filter(User.email == "premiumtest@gentek.local").first():
+        if not _seed_db.query(User).filter(User.email == auth.DEV_TEST_EMAIL).first():
             _seed_db.add(User(
                 name="[DEV TEST] Premium Account",
-                email="premiumtest@gentek.local",
+                email=auth.DEV_TEST_EMAIL,
                 password=auth.hash_password("PremiumTest123!"),
                 is_premium=1,
             ))

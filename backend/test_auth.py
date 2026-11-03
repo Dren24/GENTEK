@@ -149,6 +149,17 @@ class EmailVerificationTests(unittest.TestCase):
                                                   "device_token": other})
         self.assertEqual(r.json()["purpose"], "login")
 
+    def test_dev_test_account_bypass_only_in_dev_mode(self):
+        db = SessionLocal()
+        db.add(User(name="Dev", email=auth.DEV_TEST_EMAIL, password=auth.hash_password("pw123456")))
+        db.commit()
+        db.close()
+        body = {"email": auth.DEV_TEST_EMAIL, "password": "pw123456"}
+        # These tests run with DATABASE_URL set, i.e. not dev mode -> no bypass
+        self.assertEqual(self.client.post("/auth/login", json=body).json()["purpose"], "login")
+        with mock.patch.object(auth, "_DEV_MODE", True):
+            self.assertIn("token", self.client.post("/auth/login", json=body).json())
+
     # ── Resend ─────────────────────────────────────────────────────────────────
     def test_resend_requires_cooldown_and_pending_code(self):
         self.signup()
