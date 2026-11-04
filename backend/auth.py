@@ -22,7 +22,7 @@ from collections import defaultdict, deque
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 from typing import Optional
 from html import escape
 
@@ -276,7 +276,7 @@ def _cleanup_expired(db: Session):
 
 
 def _smtp_configured() -> bool:
-    return bool(os.getenv("GMAIL_USER", "").strip() and os.getenv("GMAIL_APP_PASSWORD", "").strip())
+    return all(_gmail_credentials())
 
 
 def _issue_code(user: User, purpose: str, db: Session, ip: str) -> dict:
@@ -782,11 +782,27 @@ def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db
 
 
 # ── Email helpers — Gmail SMTP ────────────────────────────────────────────────
+_ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+
+def _gmail_credentials() -> tuple:
+    """(GMAIL_USER, GMAIL_APP_PASSWORD). Locally, backend/.env is re-read on
+    every call, so switching the Gmail account or app password takes effect
+    without restarting the dev server (a running server otherwise keeps the
+    values it started with). In production the platform's env vars are used."""
+    user = os.getenv("GMAIL_USER", "")
+    password = os.getenv("GMAIL_APP_PASSWORD", "")
+    if _DEV_MODE and os.path.exists(_ENV_FILE):
+        values = dotenv_values(_ENV_FILE)
+        user = values.get("GMAIL_USER") or user
+        password = values.get("GMAIL_APP_PASSWORD") or password
+    return (user or "").strip(), (password or "").strip()
+
+
 def _send_email(to_email: str, subject: str, html: str, text: str = "") -> bool:
     """Sends one email over Gmail SMTP with TLS (port 465). Returns False if
     SMTP isn't configured; raises on delivery errors."""
-    gmail_user     = os.getenv("GMAIL_USER", "").strip()
-    gmail_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+    gmail_user, gmail_password = _gmail_credentials()
     if not gmail_user or not gmail_password:
         return False
     msg = MIMEMultipart("alternative")
