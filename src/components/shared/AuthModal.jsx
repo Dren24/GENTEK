@@ -1,11 +1,11 @@
 // ── AuthModal — login / signup / forgot password modal ───────────────────────
 // Opened by Navbar's "Log in" or "Sign up" buttons and the homepage CTA.
-// Internal views: 'login' | 'signup' | 'verify' | 'forgot' | 'done'
+// Internal views: 'login' | 'signup' | 'verify' | 'forgot' | 'done' | 'create-pw' | 'pw-created'
 // Pressing Escape or clicking outside closes the modal.
 
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, ShieldCheck } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, ShieldCheck, CheckCircle } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
 
@@ -26,12 +26,24 @@ function GoogleIcon() {
   )
 }
 
+// ── Create-password prompt after Google sign-in: skipping is remembered per
+// account on this browser, so it isn't shown on every Google login. ─────────
+const pwPromptKey = (id) => `gentek-pw-prompt-skipped-${id}`
+const promptSkipped = (id) => { try { return localStorage.getItem(pwPromptKey(id)) === '1' } catch { return false } }
+const skipPrompt = (id) => { try { localStorage.setItem(pwPromptKey(id), '1') } catch {} }
+
+// ── Password rule — matches _check_password_strength in backend/auth.py ─────
+const passwordProblem = (pw) =>
+  pw.length < 8 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)
+    ? 'Use at least 8 characters, including a letter and a number.'
+    : ''
+
 // ── Seconds before "Resend code" is allowed — matches CODE_RESEND_SECONDS on the backend
 const RESEND_SECONDS = 60
 
-// view: 'login' | 'signup' | 'verify' | 'forgot' | 'done'
+// view: 'login' | 'signup' | 'verify' | 'forgot' | 'done' | 'create-pw' | 'pw-created'
 export default function AuthModal({ mode = 'signup', onClose }) {
-  const { login, register, loginWithGoogle, verifyCode, resendCode } = useAuth()
+  const { login, register, loginWithGoogle, verifyCode, resendCode, createPassword } = useAuth()
   const navigate                = useNavigate()
   const [view, setView]         = useState(mode)
   const [showPass, setShowPass] = useState(false)
@@ -45,6 +57,9 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [code, setCode]         = useState('')
   const [resendIn, setResendIn] = useState(0)
   const [notice, setNotice]     = useState('')
+  // ── Create-password step (Google accounts without a GENTEK password) ─────
+  const [googleUser, setGoogleUser] = useState(null)
+  const [newPw, setNewPw]           = useState({ password: '', confirm: '' })
   const googleClientRef = useRef(null)
   const rememberRef     = useRef(true)
 
@@ -93,8 +108,15 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             setLoading(true)
             setError('')
             try {
-              await loginWithGoogle(tokenResponse.access_token, rememberRef.current)
-              onClose()
+              const u = await loginWithGoogle(tokenResponse.access_token, rememberRef.current)
+              if (u?.has_password === false && !promptSkipped(u.id)) {
+                // Offer a GENTEK password so email + password login works too
+                setGoogleUser(u)
+                setNewPw({ password: '', confirm: '' })
+                setView('create-pw')
+              } else {
+                onClose()
+              }
             } catch (err) {
               setError(err.message || 'Google sign-in failed.')
             } finally {
@@ -201,6 +223,31 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     }
   }
 
+  // ── handleCreatePassword — sets the first GENTEK password for a Google
+  // account; the backend accepts it because the sign-in just happened ──────
+  const handleCreatePassword = async (e) => {
+    e.preventDefault()
+    const problem = passwordProblem(newPw.password)
+    if (problem) { setError(problem); return }
+    if (newPw.password !== newPw.confirm) { setError('Passwords do not match.'); return }
+    setLoading(true)
+    setError('')
+    try {
+      await createPassword(newPw.password)
+      setView('pw-created')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ── handleSkipPassword — keep using Google only; Settings offers it later ──
+  const handleSkipPassword = () => {
+    if (googleUser) skipPrompt(googleUser.id)
+    onClose()
+  }
+
   // ── handleForgot — asks the backend to email a 6-digit reset code. The reply
   // is the same whether or not the email is registered, so the code step is
   // always shown next. ───────────────────────────────────────────────────────
@@ -264,6 +311,103 @@ export default function AuthModal({ mode = 'signup', onClose }) {
         >
           <X size={16} weight="bold" />
         </button>
+
+        {/* ── CREATE-PW view — offered once after Google sign-in when the
+            account has no GENTEK password yet ────────────────────────────── */}
+        {view === 'create-pw' && googleUser && (
+          <>
+            <div className="px-8 pt-8 pb-5 text-center">
+              <div className="flex justify-center mb-4">
+                <GentekMark size={44} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Create a GENTEK password</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                You're signed in with Google. Add a password to also sign in with
+              </p>
+              <p className="text-sm font-semibold text-brand-600 dark:text-brand-400 break-all mt-0.5">{googleUser.email}</p>
+            </div>
+
+            <div className="px-8 pb-8 space-y-4">
+              <form onSubmit={handleCreatePassword} className="space-y-3">
+                <div className="relative">
+                  <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    placeholder="New password"
+                    autoComplete="new-password"
+                    value={newPw.password}
+                    onChange={(e) => { setNewPw(p => ({ ...p, password: e.target.value })); setError('') }}
+                    required
+                    autoFocus
+                    className={`${inputCls} pr-10`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass(s => !s)}
+                    aria-label={showPass ? 'Hide password' : 'Show password'}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  >
+                    {showPass ? <EyeSlash size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                <div className="relative">
+                  <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    placeholder="Confirm password"
+                    autoComplete="new-password"
+                    value={newPw.confirm}
+                    onChange={(e) => { setNewPw(p => ({ ...p, confirm: e.target.value })); setError('') }}
+                    required
+                    className={inputCls}
+                  />
+                </div>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">At least 8 characters, including a letter and a number.</p>
+
+                {error && (
+                  <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">
+                    {error}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Creating password…' : 'Create password'}
+                </button>
+              </form>
+
+              <button
+                type="button"
+                onClick={handleSkipPassword}
+                className="w-full text-sm text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+              >
+                Skip for now
+              </button>
+              <p className="text-center text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
+                You can keep using Continue with Google. You can also create a password later in Settings.
+              </p>
+            </div>
+          </>
+        )}
+
+        {/* ── PW-CREATED view ──────────────────────────────────────────────── */}
+        {view === 'pw-created' && googleUser && (
+          <div className="p-10 flex flex-col items-center text-center">
+            <div className="w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
+              <CheckCircle size={28} weight="fill" className="text-brand-500" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Password created</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+              You can now sign in with Google or with <span className="font-semibold break-all">{googleUser.email}</span> and your password.
+            </p>
+            <button onClick={onClose} className="btn-primary px-8 py-2.5">
+              Continue
+            </button>
+          </div>
+        )}
 
         {/* ── SUCCESS view — shown after login or signup ─────────────────── */}
         {view === 'done' && (

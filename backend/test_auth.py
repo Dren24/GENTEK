@@ -427,9 +427,133 @@ class SafetyTests(OTPTestCase):
             self.assertIn("token", self.client.post("/auth/login", json=body).json())
 
 
+class GooglePasswordTests(OTPTestCase):
+    """Google Sign-In accounts creating a GENTEK password. Google's token
+    endpoints are simulated; everything else runs through the real API."""
+
+    def setUp(self):
+        super().setUp()
+        mock.patch.object(auth, "GOOGLE_CLIENT_ID", "test-client").start()
+        self.google_email = "gina@gmail.com"
+
+        def fake_get(url, **kw):
+            resp = mock.Mock(status_code=200)
+            if url == auth.GOOGLE_TOKENINFO_URL:
+                resp.json.return_value = {"aud": "test-client"}
+            else:
+                resp.json.return_value = {"sub": "g-123", "email": self.google_email,
+                                          "email_verified": True, "name": "Gina"}
+            return resp
+        mock.patch.object(auth.requests, "get", side_effect=fake_get).start()
+
+    def google_login(self):
+        return self.client.post("/auth/google", json={"access_token": "x"}).json()
+
+    def auth_headers(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def create_pw(self, token, pw="Strong123", code=None):
+        return self.client.post("/auth/create-password", json={"new_password": pw, "code": code},
+                                headers=self.auth_headers(token))
+
+    def test_new_google_user_has_no_password(self):
+        r = self.google_login()
+        self.assertFalse(r["has_password"])
+        # the random placeholder hash can't be used to log in
+        self.assertEqual(self.login(email=self.google_email, password="anything1").status_code, 401)
+
+    def test_create_password_right_after_google_sign_in_then_both_logins_work(self):
+        r = self.google_login()
+        self.assertEqual(self.create_pw(r["token"]).status_code, 200)
+        # email + password now works for the SAME account (same id)
+        pw_login = self.login(email=self.google_email, password="Strong123", device_token=r["device_token"]).json()
+        self.assertEqual(pw_login["id"], r["id"])
+        self.assertTrue(pw_login["has_password"])
+        # Google still works, same account, no duplicate
+        again = self.google_login()
+        self.assertEqual(again["id"], r["id"])
+        db = SessionLocal()
+        self.assertEqual(db.query(User).filter_by(email=self.google_email).count(), 1)
+        db.close()
+
+    def test_cannot_create_twice_or_overwrite(self):
+        r = self.google_login()
+        self.create_pw(r["token"])
+        second = self.create_pw(r["token"], pw="Hijack999")
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(self.login(email=self.google_email, password="Hijack999", device_token=r["device_token"]).status_code, 401)
+
+    def test_existing_password_user_is_never_asked(self):
+        device = self.verified_user()
+        r = self.client.post("/auth/login", json={"email": EMAIL, "password": PW, "device_token": device}).json()
+        self.assertTrue(r["has_password"])
+        self.assertEqual(self.create_pw(r["token"]).status_code, 409)
+
+    def test_weak_or_unauthenticated_requests_rejected(self):
+        r = self.google_login()
+        for weak in ("short1", "lettersonly", "12345678"):
+            self.assertEqual(self.create_pw(r["token"], pw=weak).status_code, 400)
+        self.assertEqual(self.client.post("/auth/create-password", json={"new_password": "Strong123"}).status_code, 403)
+
+    def test_stale_session_needs_emailed_code(self):
+        r = self.google_login()
+        stale = auth.jwt.encode({"sub": str(r["id"]), "name": "Gina", "email": self.google_email,
+                                 "iat": datetime.utcnow() - timedelta(minutes=auth.FRESH_SIGNIN_MINUTES + 1),
+                                 "exp": datetime.utcnow() + timedelta(days=1)}, auth._JWT_SECRET, algorithm="HS256")
+        self.assertEqual(self.create_pw(stale).status_code, 403)
+        sent = self.client.post("/auth/create-password/send-code", headers=self.auth_headers(stale))
+        self.assertEqual(sent.json()["purpose"], "setpw")
+        self.assertEqual(self.sent[-1][0], self.google_email)       # code goes to the account's own address
+        self.assertEqual(self.create_pw(stale, code=self.wrong(self.last_code("setpw"))).status_code, 400)
+        self.assertEqual(self.create_pw(stale, code=self.last_code("setpw")).status_code, 200)
+
+    def test_skip_keeps_google_login_working(self):
+        r = self.google_login()   # user skips the prompt: nothing is called
+        again = self.google_login()
+        self.assertEqual(again["id"], r["id"])
+        self.assertFalse(again["has_password"])
+
+    def test_google_links_to_verified_password_account_and_keeps_password(self):
+        self.google_email = EMAIL
+        device = self.verified_user()
+        r = self.google_login()
+        self.assertTrue(r["has_password"])
+        self.assertEqual(self.login(password=PW, device_token=r["device_token"]).json()["id"], r["id"])
+
+    def test_google_link_wipes_password_of_unverified_signup(self):
+        # Pre-hijack: someone registers the victim's address and never verifies.
+        self.google_email = EMAIL
+        self.signup(password="Attacker1")
+        r = self.google_login()
+        self.assertFalse(r["has_password"])
+        self.assertEqual(self.login(password="Attacker1", device_token=r["device_token"]).status_code, 401)
+
+    def test_change_password_points_google_user_to_create(self):
+        r = self.google_login()
+        res = self.client.put(f"/auth/change-password/{r['id']}", json={"current_password": "x", "new_password": "Strong123"},
+                              headers=self.auth_headers(r["token"]))
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Create password", res.json()["detail"])
+
+    def test_forgot_password_also_creates_a_password(self):
+        r = self.google_login()
+        self.forgot(email=self.google_email)
+        token = self.verify_reset(self.last_code("reset"), email=self.google_email).json()["reset_token"]
+        self.reset(token, "Strong123")
+        self.assertTrue(self.google_login()["has_password"])
+
+    def test_payload_never_contains_hash(self):
+        r = self.google_login()
+        self.assertNotIn("password", r)
+        db = SessionLocal()
+        stored = db.query(User).filter_by(email=self.google_email).one().password
+        db.close()
+        self.assertNotIn(stored, str(r))
+
+
 class TemplateTests(unittest.TestCase):
     def test_templates_have_code_expiry_warning_and_escape_name(self):
-        for purpose in ("verify", "login", "reset"):
+        for purpose in ("verify", "login", "reset", "setpw"):
             captured = {}
             with mock.patch.object(auth, "_send_email",
                                    side_effect=lambda to, subj, html, text: captured.update(subj=subj, html=html, text=text) or True):

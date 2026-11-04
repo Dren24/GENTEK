@@ -10,6 +10,7 @@ from sqlalchemy import update, delete
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 import bcrypt
+import re
 import hashlib
 import secrets
 import smtplib
@@ -58,6 +59,7 @@ def _create_token(user_id: int, name: str, email: str, remember: bool = True) ->
         "sub":   str(user_id),
         "name":  name,
         "email": email,
+        "iat":   datetime.utcnow(),   # sign-in time — sensitive actions can require a fresh one
         "exp":   datetime.utcnow() + exp_delta,
     }
     return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
@@ -70,7 +72,8 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(_beare
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
-        return {"id": int(user_id), "name": payload.get("name"), "email": payload.get("email")}
+        return {"id": int(user_id), "name": payload.get("name"), "email": payload.get("email"),
+                "iat": payload.get("iat")}
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
@@ -150,8 +153,12 @@ CODE_RESEND_SECONDS    = 60
 TRUSTED_DEVICE_DAYS    = 30
 RESET_TOKEN_MINUTES    = 10    # window to choose a new password after a correct reset code
 PENDING_SIGNUP_DAYS    = 7     # unverified sign-ups older than this are removed
-# 'verify' = sign-up, 'login' = login from a new browser, 'reset' = forgot password
-CODE_PURPOSES          = {"verify", "login", "reset"}
+# 'verify' = sign-up, 'login' = login from a new browser, 'reset' = forgot
+# password, 'setpw' = a Google-only user creating a password from Settings
+CODE_PURPOSES          = {"verify", "login", "reset", "setpw"}
+# Creating a password right after Google sign-in needs no emailed code if
+# the sign-in (JWT issue time) is at most this recent.
+FRESH_SIGNIN_MINUTES   = 15
 # Local dev (SQLite, no DATABASE_URL) also prints codes to the server log, so
 # codes stay usable locally when Gmail isn't set up. Never in production:
 # codes are only ever delivered by email there.
@@ -228,6 +235,7 @@ def _user_payload(user: User, db: Session, remember: bool, new_device: bool = Fa
     payload = {
         "id": user.id, "name": user.name, "email": user.email,
         "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium),
+        "has_password": bool(user.has_password),
         "token": _create_token(user.id, user.name, user.email, remember=remember),
     }
     if new_device:
@@ -519,12 +527,20 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
 
     # Step 3: find-or-create — link to an existing account by google_id first,
     # then by email (so a prior email/password signup isn't duplicated), else
-    # create a fresh GENTEK account. Google users get an unusable random
-    # password hash — they never set one and can't log in with it.
+    # create a fresh GENTEK account. New Google accounts get an unusable random
+    # password hash and has_password=0 until the user creates a password.
     user = db.query(User).filter(User.google_id == google_id).first()
     if not user:
         user = db.query(User).filter(User.email == email).first()
         if user:
+            if not user.email_verified:
+                # Someone signed up with this address but never proved they own
+                # it — the password on it may be an attacker's. Google just
+                # proved ownership, so that password must not survive the link.
+                user.password = hash_password(secrets.token_urlsafe(32))
+                user.has_password = 0
+                for model in (TrustedDevice, PasswordResetToken):
+                    db.query(model).filter(model.user_id == user.id).delete()
             user.google_id = google_id
         else:
             user = User(
@@ -532,6 +548,7 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
                 email=email,
                 password=hash_password(secrets.token_urlsafe(32)),
                 google_id=google_id,
+                has_password=0,
             )
             db.add(user)
         db.commit()
@@ -596,6 +613,8 @@ def change_password(user_id: int, req: ChangePasswordRequest, db: Session = Depe
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if not user.has_password:
+        raise HTTPException(status_code=400, detail="This account has no password yet. Use Create password instead.")
     if not verify_password(req.current_password, user.password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if len(req.new_password) < 6:
@@ -603,6 +622,61 @@ def change_password(user_id: int, req: ChangePasswordRequest, db: Session = Depe
     user.password = hash_password(req.new_password)
     db.commit()
     return {"message": "Password changed successfully"}
+
+
+# ── Create password — for Google Sign-In accounts without a GENTEK password ──
+# Only ever sets a FIRST password (409 if one exists — changing it goes
+# through change-password, which needs the current one). Identity proof:
+# the request's JWT must come from a sign-in in the last FRESH_SIGNIN_MINUTES
+# (the prompt shown right after Google sign-in), or carry a 'setpw' code
+# emailed to the account's address (Settings, any time later).
+_PASSWORD_RULE = "Password must be at least 8 characters and include a letter and a number"
+
+
+def _check_password_strength(pw: str):
+    if len(pw) < 8 or not re.search(r"[A-Za-z]", pw) or not re.search(r"\d", pw):
+        raise HTTPException(status_code=400, detail=_PASSWORD_RULE)
+
+
+class CreatePasswordRequest(BaseModel):
+    new_password: str
+    code: Optional[str] = None
+
+
+def _user_without_password(current_user: dict, db: Session) -> User:
+    user = db.query(User).filter(User.id == current_user["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.has_password:
+        raise HTTPException(status_code=409, detail="This account already has a password. Use Change password instead.")
+    return user
+
+
+@router.post("/create-password/send-code")
+def create_password_send_code(request: Request, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    user = _user_without_password(current_user, db)
+    return _code_flow(user, "setpw", db, _client_ip(request))
+
+
+@router.post("/create-password")
+def create_password(req: CreatePasswordRequest, request: Request, db: Session = Depends(get_db),
+                    current_user: dict = Depends(get_current_user)):
+    user = _user_without_password(current_user, db)
+    _check_password_strength(req.new_password)
+    if req.code:
+        _consume_code(user, "setpw", req.code, db, _client_ip(request))
+    else:
+        iat = current_user.get("iat")
+        if not iat or time.time() - float(iat) > FRESH_SIGNIN_MINUTES * 60:
+            # 403, not 401: the session is valid (the frontend logs out on 401)
+            raise HTTPException(status_code=403, detail="For your security, confirm with the code we email you.")
+    # Conditional update: two racing requests can't both set a password
+    if db.execute(update(User).where(User.id == user.id, User.has_password == 0)
+                  .values(password=hash_password(req.new_password), has_password=1)).rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This account already has a password. Use Change password instead.")
+    db.commit()
+    return {"message": "Password created", "has_password": True}
 
 
 # ── PUT /auth/notifications/{user_id} — save email notification preference ───
@@ -735,6 +809,9 @@ _CODE_EMAILS = {
     "login":  ("Your GENTEK sign-in code", "Confirm it's you",
                "Someone signed in to your GENTEK account from a new browser. Use this code to continue.",
                "If this wasn't you, don't enter the code — change your GENTEK password."),
+    "setpw":  ("Your GENTEK code to create a password", "Create your password",
+               "Use this code to create a password for your GENTEK account, so you can also sign in with your email.",
+               "If you didn't ask for this, ignore this email — no password will be created."),
     "reset":  ("Your GENTEK password reset code", "Reset your password",
                "Use this code to reset your GENTEK password.",
                "If you didn't ask to reset your password, ignore this email — your password stays the same."),
@@ -842,6 +919,7 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
         db.commit()
         raise invalid
     user.password = hash_password(req.new_password)
+    user.has_password = 1
     # Proving the inbox also confirms the address; the password changed, so
     # browsers trusted under the old one must confirm again.
     user.email_verified = 1

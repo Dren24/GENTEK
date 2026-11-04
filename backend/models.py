@@ -24,6 +24,10 @@ class User(Base):
     # 1 so accounts created before verification existed aren't locked out;
     # /auth/register explicitly creates new accounts with 0.
     email_verified       = Column(Integer, default=1, server_default='1', nullable=False)
+    # 0 for accounts created through Google Sign-In until the user creates a
+    # GENTEK password (their stored hash is random and unusable until then).
+    # Defaults to 1 so existing accounts keep logging in exactly as before.
+    has_password         = Column(Integer, default=1, server_default='1', nullable=False)
     created_at           = Column(DateTime, default=datetime.utcnow)
 
     # ── Relationship: one user → many analyses (cascade delete) ───────────────

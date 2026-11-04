@@ -12,6 +12,103 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useDarkMode } from '../hooks/useDarkMode'
 
+// ── CreatePasswordModal — for Google Sign-In accounts with no GENTEK password.
+// Identity is confirmed with a code emailed to the account's own address
+// (the sign-in may be days old), then the first password is set. ───────────
+function CreatePasswordModal({ email, onClose }) {
+  const { sendCreatePasswordCode, createPassword } = useAuth()
+  const [step, setStep]       = useState('send')   // 'send' | 'form' | 'done'
+  const [form, setForm]       = useState({ code: '', password: '', confirm: '' })
+  const [showPass, setShow]   = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+
+  const inputCls = "w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
+  const set = (k) => (e) => { setForm(f => ({ ...f, [k]: k === 'code' ? e.target.value.replace(/\D/g, '').slice(0, 6) : e.target.value })); setError('') }
+
+  const sendCode = async () => {
+    setLoading(true); setError('')
+    try { await sendCreatePasswordCode(); setStep('form') }
+    catch (err) { setError(err.message) }
+    finally { setLoading(false) }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (form.password.length < 8 || !/[A-Za-z]/.test(form.password) || !/\d/.test(form.password)) {
+      setError('Use at least 8 characters, including a letter and a number.'); return
+    }
+    if (form.password !== form.confirm) { setError('Passwords do not match.'); return }
+    setLoading(true)
+    try { await createPassword(form.password, form.code); setStep('done') }
+    catch (err) { setError(err.message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div className="relative w-full max-w-sm bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 p-6">
+        <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <X size={14} weight="bold" />
+        </button>
+
+        {step === 'done' ? (
+          <div className="text-center py-4">
+            <CheckCircle size={40} weight="fill" className="text-brand-500 mx-auto mb-3" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Password created!</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-5">You can now sign in with Google or with your email and password.</p>
+            <button onClick={onClose} className="btn-primary px-8 py-2.5">Done</button>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Create Password</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              {step === 'send'
+                ? <>To confirm it's you, we'll email a 6-digit code to <span className="font-semibold break-all">{email}</span>.</>
+                : <>Enter the code we sent to <span className="font-semibold break-all">{email}</span> and choose a password.</>}
+            </p>
+
+            {step === 'send' ? (
+              <>
+                {error && <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center mb-3">{error}</p>}
+                <button onClick={sendCode} disabled={loading} className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60">
+                  {loading ? 'Sending code…' : 'Email me a code'}
+                </button>
+              </>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-3">
+                <input
+                  type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="000000" maxLength={6}
+                  value={form.code} onChange={set('code')} required autoFocus aria-label="6-digit code"
+                  className="w-full py-2.5 text-center text-xl font-bold tracking-[0.5em] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
+                />
+                <div className="relative">
+                  <Lock size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input type={showPass ? 'text' : 'password'} placeholder="New password" autoComplete="new-password" value={form.password} onChange={set('password')} required className={inputCls} />
+                  <button type="button" onClick={() => setShow(s => !s)} aria-label={showPass ? 'Hide password' : 'Show password'} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    {showPass ? <EyeSlash size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input type={showPass ? 'text' : 'password'} placeholder="Confirm password" autoComplete="new-password" value={form.confirm} onChange={set('confirm')} required className={inputCls} />
+                </div>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">At least 8 characters, including a letter and a number. The code expires in 5 minutes.</p>
+                {error && <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">{error}</p>}
+                <button type="submit" disabled={loading || form.code.length !== 6} className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed">
+                  {loading ? 'Creating…' : 'Create password'}
+                </button>
+              </form>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── ChangePasswordModal — three fields: current, new, confirm password ────────
 function ChangePasswordModal({ userId, onClose }) {
   const { authHeader } = useAuth()
@@ -245,6 +342,7 @@ export default function SettingsPage() {
   const [notifications, setNotifications] = useState(user?.email_notifications ?? true)
   const [showDeleteModal, setShowDeleteModal]     = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [showCreatePwModal, setShowCreatePwModal] = useState(false)
 
   // ── Redirect guests to homepage — settings requires auth ─────────────────
   // Must be after all hooks (Rules of Hooks)
@@ -358,10 +456,16 @@ export default function SettingsPage() {
 
           {/* ── Security section — password change + 2FA (coming soon) ────── */}
           <Section title="Security">
-            {/* Password change — text button link */}
-            <Row icon={Lock} label="Password" desc="Change your account password">
-              <button onClick={() => setShowPasswordModal(true)} className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">Change</button>
-            </Row>
+            {/* Password — Google-only accounts create one; everyone else changes theirs */}
+            {user?.has_password === false ? (
+              <Row icon={Lock} label="Password" desc="You sign in with Google. Create a password to also sign in with your email.">
+                <button onClick={() => setShowCreatePwModal(true)} className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">Create</button>
+              </Row>
+            ) : (
+              <Row icon={Lock} label="Password" desc="Change your account password">
+                <button onClick={() => setShowPasswordModal(true)} className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline">Change</button>
+              </Row>
+            )}
             {/* Two-Factor Auth — not yet implemented */}
             <Row icon={ShieldCheck} label="Two-Factor Auth" desc="Add an extra layer of security">
               <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500">Coming soon</span>
@@ -392,6 +496,11 @@ export default function SettingsPage() {
 
         </div>
       </div>
+
+      {/* ── Create password modal (Google-only accounts) ────────────────────── */}
+      {showCreatePwModal && (
+        <CreatePasswordModal email={user?.email} onClose={() => setShowCreatePwModal(false)} />
+      )}
 
       {/* ── Change password modal ─────────────────────────────────────────── */}
       {showPasswordModal && (

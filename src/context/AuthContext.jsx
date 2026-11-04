@@ -298,6 +298,29 @@ export function AuthProvider({ children }) {
   }
 
   // ── updateNotifications — toggle email notifications and persist to DB ───────
+  // ── createPassword — POST /auth/create-password. For Google Sign-In accounts
+  // without a GENTEK password; never replaces an existing one. Right after
+  // Google sign-in no code is needed; later (Settings) pass the emailed code. ──
+  const createPassword = async (newPassword, code = null) => {
+    const res = await authFetch('/auth/create-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPassword, code }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || 'Could not create the password')
+    const updated = { ...user, has_password: true }
+    setUser(updated)
+    ;(rememberMe ? localStorage : sessionStorage).setItem('gentek-user', JSON.stringify(updated))
+  }
+
+  // ── sendCreatePasswordCode — emails a 'setpw' code to the account's address ──
+  const sendCreatePasswordCode = async () => {
+    const res = await authFetch('/auth/create-password/send-code', { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || 'Could not send the code')
+  }
+
   const updateNotifications = async (value) => {
     if (!user?.id) return
     const updated = { ...user, email_notifications: value }
@@ -339,7 +362,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
+      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,
