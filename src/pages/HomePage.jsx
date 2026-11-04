@@ -24,6 +24,7 @@ import { useAuth } from '../context/AuthContext'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import AuthModal from '../components/shared/AuthModal'
 import { escapeRx, escapeHtml, highlightHtml, fixOne, rewriteAll } from '../utils/biasHighlight'
+import { biasBreakdown } from '../utils/biasScore'
 
 // ── FREE_WORD_LIMIT — max words a Free (non-premium) logged-in user can have
 // analyzed in one go. Configurable without a code change via VITE_FREE_WORD_LIMIT;
@@ -112,12 +113,9 @@ function runAnalysis(text) {
   const detected = BIAS_PATTERNS.filter(p => new RegExp(`\\b${escapeRx(p.word).replace(/\s+/g, '\\s+')}\\b`, 'i').test(text))
   const male   = detected.filter(p => p.type === 'male').length
   const female = detected.filter(p => p.type === 'female').length
-  let label = 'GENDER-NEUTRAL', score = 0, color = '#0D9488'
-  if (detected.length > 0) {
-    label = female > male ? 'FEMALE-BIASED' : 'MALE-BIASED'
-    score = Math.min(95, 40 + Math.max(male, female) * 15)
-    color = label === 'FEMALE-BIASED' ? '#F43F5E' : '#3B82F6'
-  }
+  // Same score table as the backend, so percentages match either way
+  const { label, score } = localScore(detected)
+  const color = localColor(label)
   const html = highlightHtml(text, detected)
   return { detected, male, female, label, score, color, html, words: text.trim().split(/\s+/).length }
 }
@@ -445,9 +443,10 @@ export default function HomePage() {
   // (same blue/rose/teal used to highlight words in the text and used for
   // the classification badge/color elsewhere in the app). ──────────────────
   const classificationInfo = (() => {
-    if (!results) return null
-    if (results.label === 'MALE-BIASED')   return { label: 'Male-Biased',   dot: 'bg-blue-500' }
-    if (results.label === 'FEMALE-BIASED') return { label: 'Female-Biased', dot: 'bg-rose-500' }
+    const shown = results || cleanResult
+    if (!shown) return null
+    if (shown.label === 'MALE-BIASED')   return { label: 'Male-Biased',   dot: 'bg-blue-500' }
+    if (shown.label === 'FEMALE-BIASED') return { label: 'Female-Biased', dot: 'bg-rose-500' }
     return { label: 'Gender-Neutral', dot: 'bg-brand-500' }
   })()
 
@@ -475,6 +474,17 @@ export default function HomePage() {
     : shownAnalysis.ai_powered === false ? 'none'
     : shownAnalysis.ai_partial ? 'partial'
     : shownAnalysis.ai_powered ? 'full' : null
+
+  // ── breakdown — the overall score split into Male / Female / Gender-Neutral
+  // shares (always totals 100). A zero-detection result is only a confirmed
+  // Gender-Neutral when the AI reviewed the whole text. ─────────────────────
+  const breakdown = shownAnalysis
+    ? biasBreakdown(shownAnalysis.score || 0,
+        shownAnalysis.detected?.filter(d => d.type === 'male').length || 0,
+        shownAnalysis.detected?.filter(d => d.type === 'female').length || 0)
+    : null
+  const noBiasFound = !!shownAnalysis && !(shownAnalysis.detected?.length)
+  const neutralConfirmed = noBiasFound && aiCoverage === 'full'
 
   // ── normalizeApiResult — coerces API response into a consistent result shape ──
   // Fills in derived fields (label, color, html) if the backend didn't return them.
@@ -534,22 +544,21 @@ export default function HomePage() {
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       const r = normalizeApiResult(data, inputText)
-      // Zero detections: reset to the plain pre-analysis state instead of
-      // leaving an "Analyzed — no bias" status up — same behavior as after
-      // Rewrite Text. The result is still saved to history either way.
+      // Zero detections: keep the editor editable and show the no-bias result
+      // (indicators + Gender-Neutral message) via cleanResult; it stays until
+      // the text is edited, cleared, or analyzed again. Saved to history either way.
       setResults(r.detected.length === 0 ? null : r)
-      if (r.detected.length === 0) setCleanResult({ text: inputText, ai_powered: r.ai_powered !== false, ai_partial: !!r.ai_partial })
+      if (r.detected.length === 0) setCleanResult({ ...r, text: inputText, ai_powered: r.ai_powered !== false, ai_partial: !!r.ai_partial })
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
       succeeded = true
     } catch {
       const r = { ...runAnalysis(inputText), ai_powered: false }
-      // Zero detections: reset to the plain pre-analysis state instead of
-      // leaving an "Analyzed — no bias" status up — same behavior as after
-      // Rewrite Text. The result is still saved to history either way.
+      // Server unreachable — keyword-only result; with zero detections it is
+      // shown as not confirmed (see aiCoverage), never as confirmed neutral.
       setResults(r.detected.length === 0 ? null : r)
-      if (r.detected.length === 0) setCleanResult({ text: inputText, ai_powered: false, ai_partial: false })
+      if (r.detected.length === 0) setCleanResult({ ...r, text: inputText, ai_powered: false, ai_partial: false })
       setAna(false)
       pushTextStack(inputText)
       saveToHistory(r)
@@ -932,19 +941,6 @@ export default function HomePage() {
                 <div className="flex items-center gap-2">
                   {!results ? (
                     <>
-                      {/* No-bias result for the current text — the editor stays editable */}
-                      {shownClean && (aiCoverage === 'full' ? (
-                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 dark:text-brand-400 mr-1 whitespace-nowrap">
-                          <CheckCircle size={16} weight="fill" />
-                          Gender-Neutral<span className="hidden sm:inline">&nbsp;— no gender bias found</span>
-                        </span>
-                      ) : (
-                        /* Nothing found, but the AI didn't read all of it — don't claim neutral */
-                        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700 dark:text-amber-400 mr-1 whitespace-nowrap">
-                          <WarningCircle size={16} weight="fill" />
-                          Not fully checked<span className="hidden sm:inline">&nbsp;— try again shortly</span>
-                        </span>
-                      ))}
                       {/* Try Sample — guests only, loads male-biased sample */}
                       {!user && (
                         <button
@@ -985,38 +981,78 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* ── Analysis percentages — Bias Detected / Gender-Neutral / Classification ── */}
-              {results && (
+              {/* ── Analysis percentages — Male / Female / Gender-Neutral shares of the
+                  overall score (always total 100%) + Classification. Shown for every
+                  result, including no-bias ones (shownClean). ───────────────────── */}
+              {shownAnalysis && breakdown && (
                 <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800">
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
                     <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                      <span className="text-sm text-gray-600 dark:text-gray-300">
+                        Male Bias: <strong className="text-gray-900 dark:text-white tabular-nums">{breakdown.malePct}%</strong>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" />
                       <span className="text-sm text-gray-600 dark:text-gray-300">
-                        Bias Detected: <strong className="text-gray-900 dark:text-white tabular-nums">{results.score}%</strong>
+                        Female Bias: <strong className="text-gray-900 dark:text-white tabular-nums">{breakdown.femalePct}%</strong>
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
                       <span className="text-sm text-gray-600 dark:text-gray-300">
-                        Gender-Neutral: <strong className="text-gray-900 dark:text-white tabular-nums">{100 - results.score}%</strong>
+                        Gender-Neutral:{' '}
+                        {noBiasFound && !neutralConfirmed
+                          ? <strong className="text-amber-700 dark:text-amber-400" title="The AI couldn't review this text, so this isn't a confirmed result">Unconfirmed</strong>
+                          : <strong className="text-gray-900 dark:text-white tabular-nums">{breakdown.neutralPct}%</strong>}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${classificationInfo.dot}`} />
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${noBiasFound && !neutralConfirmed ? 'bg-amber-500' : classificationInfo.dot}`} />
                       <span className="text-sm text-gray-600 dark:text-gray-300">
-                        Classification: <strong className="text-gray-900 dark:text-white">{classificationInfo.label}</strong>
+                        Classification: <strong className="text-gray-900 dark:text-white">
+                          {noBiasFound && !neutralConfirmed ? 'Not confirmed' : classificationInfo.label}
+                        </strong>
                       </span>
                     </div>
                   </div>
 
-                  {/* ── Result message — deliberately hedged: a 0% score means GENTEK's
-                      analysis found no patterns, not that the text is guaranteed
-                      bias-free. Never claims certainty either way. ─────────────────── */}
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                    {results.score === 0
-                      ? "No significant gender-biased patterns were detected based on GENTEK's analysis."
-                      : 'Potential gender-biased patterns were detected in the text.'}
-                  </p>
+                  {/* ── Proportion bar — same three colors, widths = the percentages ── */}
+                  {!(noBiasFound && !neutralConfirmed) && (
+                    <div
+                      className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800 mt-3"
+                      role="img"
+                      aria-label={`Male bias ${breakdown.malePct}%, female bias ${breakdown.femalePct}%, gender-neutral ${breakdown.neutralPct}%`}
+                    >
+                      <span className="bg-blue-500" style={{ width: `${breakdown.malePct}%` }} />
+                      <span className="bg-rose-500" style={{ width: `${breakdown.femalePct}%` }} />
+                      <span className="bg-brand-500" style={{ width: `${breakdown.neutralPct}%` }} />
+                    </div>
+                  )}
+
+                  {/* ── Result message — hedged: 0% means GENTEK found no patterns, not
+                      that the text is guaranteed bias-free; an AI-less check is never
+                      presented as a confirmed Gender-Neutral result. ──────────────── */}
+                  {neutralConfirmed ? (
+                    <p className="flex items-start gap-1.5 text-xs font-medium text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-xl px-3 py-2 mt-3">
+                      <CheckCircle size={14} weight="fill" className="flex-shrink-0 mt-px" />
+                      Gender-Neutral — no significant gender-biased patterns were detected based on GENTEK's analysis.
+                    </p>
+                  ) : noBiasFound ? (
+                    <p className="flex items-start gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2 mt-3">
+                      <WarningCircle size={14} weight="fill" className="flex-shrink-0 mt-px" />
+                      {aiCoverage === 'partial'
+                        ? "No bias found in the parts GENTEK could check, but the AI couldn't review all of this text. Try again shortly for a complete result."
+                        : "No bias found by the keyword check, but the AI couldn't review this text, so it isn't confirmed Gender-Neutral. Try again shortly."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                      {breakdown.malePct > 0 && breakdown.femalePct > 0
+                        ? `Both male- and female-biased patterns were detected (${shownAnalysis.detected.filter(d => d.type === 'male').length} male, ${shownAnalysis.detected.filter(d => d.type === 'female').length} female).`
+                        : 'Potential gender-biased patterns were detected in the text.'}
+                    </p>
+                  )}
 
                   {/* ── Compact color legend — same classes used to highlight words above,
                       so colors always match exactly. Sits right under the percentages,

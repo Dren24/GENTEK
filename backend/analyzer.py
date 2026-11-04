@@ -894,6 +894,18 @@ def _score(detected: List[Dict]) -> tuple:
     return label, score
 
 
+def bias_breakdown(score: int, male: int, female: int) -> tuple:
+    """(male %, female %, gender-neutral %) — the overall score split between
+    male- and female-biased detections by their counts, so the three always
+    total 100. Shares of the score, not probabilities. Rounds half up to match
+    biasBreakdown() in src/utils/biasScore.js."""
+    total = male + female
+    if not total or not score:
+        return 0, 0, 100
+    male_pct = int(score * male / total + 0.5)
+    return male_pct, score - male_pct, 100 - score
+
+
 def analyze(text: str) -> dict:
     words = len(text.strip().split()) if text.strip() else 0
 
@@ -927,6 +939,7 @@ def analyze(text: str) -> dict:
     label, score = _score(detected)
     male   = sum(1 for d in detected if _effective_gender(d) == "male")
     female = sum(1 for d in detected if _effective_gender(d) == "female")
+    male_pct, female_pct, neutral_pct = bias_breakdown(score, male, female)
 
     return {
         "detected":   detected,
@@ -934,6 +947,9 @@ def analyze(text: str) -> dict:
         "female":     female,
         "label":      label,
         "score":      score,
+        "male_pct":    male_pct,
+        "female_pct":  female_pct,
+        "neutral_pct": neutral_pct,
         "color":      COLOR_MAP[label],
         "words":      words,
         "ai_powered": ai_powered,

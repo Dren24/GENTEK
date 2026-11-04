@@ -331,6 +331,29 @@ class CodedWordContextTests(unittest.TestCase):
         self.assertEqual(self.words("He said she was bossy."), [("bossy", "female")])
 
 
+class BreakdownTests(unittest.TestCase):
+    def test_breakdown_totals_100_and_splits_by_count(self):
+        self.assertEqual(analyzer.bias_breakdown(0, 0, 0), (0, 0, 100))
+        self.assertEqual(analyzer.bias_breakdown(20, 1, 0), (20, 0, 80))
+        self.assertEqual(analyzer.bias_breakdown(20, 0, 1), (0, 20, 80))
+        self.assertEqual(analyzer.bias_breakdown(35, 1, 1), (18, 17, 65))   # half rounds up
+        self.assertEqual(analyzer.bias_breakdown(50, 2, 1), (33, 17, 50))
+        for score in (20, 35, 50, 60, 70, 78, 84, 95):
+            for m in range(0, 6):
+                for f in range(0, 6):
+                    if m + f:
+                        self.assertEqual(sum(analyzer.bias_breakdown(score, m, f)), 100)
+
+    def test_analyze_returns_breakdown(self):
+        with mock.patch.object(analyzer, "LLM_API_KEY", ""):
+            r = analyzer.analyze("The chairman met the stewardess and the salesman.")
+        self.assertEqual((r["male"], r["female"], r["score"]), (2, 1, 50))
+        self.assertEqual((r["male_pct"], r["female_pct"], r["neutral_pct"]), (33, 17, 50))
+        with mock.patch.object(analyzer, "LLM_API_KEY", ""):
+            r = analyzer.analyze("The team met today.")
+        self.assertEqual((r["male_pct"], r["female_pct"], r["neutral_pct"]), (0, 0, 100))
+
+
 class ProviderConfigTests(unittest.TestCase):
     """Provider is chosen at import time from env vars; reload under a fixed env."""
 
