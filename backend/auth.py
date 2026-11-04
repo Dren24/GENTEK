@@ -153,8 +153,8 @@ PENDING_SIGNUP_DAYS    = 7     # unverified sign-ups older than this are removed
 # 'verify' = sign-up, 'login' = login from a new browser, 'reset' = forgot password
 CODE_PURPOSES          = {"verify", "login", "reset"}
 # Local dev (SQLite, no DATABASE_URL) also prints codes to the server log, so
-# seeded test accounts with undeliverable addresses can still log in. Never
-# in production: codes are only ever delivered by email there.
+# codes stay usable locally when Gmail isn't set up. Never in production:
+# codes are only ever delivered by email there.
 _DEV_MODE = not os.getenv("DATABASE_URL")
 # The seeded local test account (see main.py) skips emailed codes — its
 # address can't receive mail. Only in local dev; never with a real database.
@@ -296,7 +296,9 @@ def _issue_code(user: User, purpose: str, db: Session, ip: str) -> dict:
         # credentials; the code itself is not logged.
         print(f"[auth] failed to send {purpose} code to {user.email}: {type(e).__name__}: {e}", flush=True)
         sent = False
-    if not sent and not _DEV_MODE:
+    # Locally, a missing Gmail setup is tolerated (the code is printed above);
+    # a configured Gmail that fails is reported, so "sent" never lies.
+    if not sent and not (_DEV_MODE and not _smtp_configured()):
         db.execute(delete(EmailCode).where(EmailCode.user_id == user.id, EmailCode.purpose == purpose))
         db.commit()
         raise HTTPException(status_code=503, detail="We couldn't send the verification email. Please try again in a few minutes.")

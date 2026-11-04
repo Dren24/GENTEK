@@ -163,6 +163,14 @@ class SignUpTests(OTPTestCase):
         self.assertEqual(db.query(EmailCode).count(), 0)
         db.close()
 
+    def test_dev_mode_reports_failed_send_when_gmail_is_configured(self):
+        self.send_mock.side_effect = lambda *a: False
+        with mock.patch.object(auth, "_DEV_MODE", True):
+            with mock.patch.object(auth, "_smtp_configured", return_value=True):
+                self.assertEqual(self.signup().status_code, 503)
+            with mock.patch.object(auth, "_smtp_configured", return_value=False):
+                self.assertEqual(self.signup(email="local@example.com").status_code, 200)
+
     def test_smtp_exception_reports_503(self):
         def boom(*a):
             raise OSError("connection refused")
