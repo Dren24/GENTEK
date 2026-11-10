@@ -35,7 +35,11 @@ with engine.connect() as _conn:
             _conn.execute(text(_sql))
             _conn.commit()
         except Exception:
-            pass  # column already exists — safe to ignore
+            # Column already exists — safe to ignore. The rollback matters on
+            # PostgreSQL (Neon): a failed statement aborts the transaction, and
+            # without it every later ALTER in this loop would fail too, so new
+            # columns would silently never be added.
+            _conn.rollback()
 
 # ── Seed a DEV/TEST Premium account — local SQLite dev only, never touches a
 # real (Railway/Postgres) production database. Lets Premium behavior be tested
