@@ -276,7 +276,8 @@ def _cleanup_expired(db: Session):
 
 
 def _smtp_configured() -> bool:
-    return all(_gmail_credentials())
+    """True if any email transport is set up (Brevo API or Gmail SMTP)."""
+    return bool(_env_value("BREVO_API_KEY")) or all(_gmail_credentials())
 
 
 def _issue_code(user: User, purpose: str, db: Session, ip: str) -> dict:
@@ -785,26 +786,50 @@ def delete_analysis(user_id: int, analysis_id: int, db: Session = Depends(get_db
 _ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
 
-def _gmail_credentials() -> tuple:
-    """(GMAIL_USER, GMAIL_APP_PASSWORD). Locally, backend/.env is re-read on
-    every call, so switching the Gmail account or app password takes effect
-    without restarting the dev server (a running server otherwise keeps the
-    values it started with). In production the platform's env vars are used."""
-    user = os.getenv("GMAIL_USER", "")
-    password = os.getenv("GMAIL_APP_PASSWORD", "")
+def _env_value(name: str) -> str:
+    """An env var. Locally, backend/.env is re-read on every call, so changing
+    email settings takes effect without restarting the dev server (a running
+    server otherwise keeps the values it started with). In production the
+    platform's env vars are used (.env is never deployed)."""
+    value = os.getenv(name, "")
     if _DEV_MODE and os.path.exists(_ENV_FILE):
-        values = dotenv_values(_ENV_FILE)
-        user = values.get("GMAIL_USER") or user
-        password = values.get("GMAIL_APP_PASSWORD") or password
-    return (user or "").strip(), (password or "").strip()
+        value = dotenv_values(_ENV_FILE).get(name) or value
+    return (value or "").strip()
 
 
-def _send_email(to_email: str, subject: str, html: str, text: str = "") -> bool:
-    """Sends one email over Gmail SMTP with TLS (port 465). Returns False if
-    SMTP isn't configured; raises on delivery errors."""
-    gmail_user, gmail_password = _gmail_credentials()
-    if not gmail_user or not gmail_password:
-        return False
+def _gmail_credentials() -> tuple:
+    """(GMAIL_USER, GMAIL_APP_PASSWORD)."""
+    return _env_value("GMAIL_USER"), _env_value("GMAIL_APP_PASSWORD")
+
+
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+
+
+def _send_via_brevo(api_key: str, to_email: str, subject: str, html: str, text: str):
+    """Brevo's transactional email API over HTTPS. Hosts that block outgoing
+    mail ports (Render's free plan blocks SMTP) still allow this. The sender
+    address must be verified in Brevo; it defaults to GMAIL_USER."""
+    sender = _env_value("BREVO_SENDER_EMAIL") or _env_value("GMAIL_USER")
+    if not sender:
+        raise RuntimeError("no sender address: set BREVO_SENDER_EMAIL (or GMAIL_USER)")
+    body = {
+        "sender": {"name": "GENTEK", "email": sender},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "htmlContent": html,
+    }
+    if text:
+        body["textContent"] = text
+    resp = requests.post(BREVO_URL, headers={"api-key": api_key, "accept": "application/json"},
+                         json=body, timeout=15)
+    if resp.status_code >= 300:
+        # Brevo's error body names the problem (e.g. unverified sender); it
+        # never contains the API key.
+        raise RuntimeError(f"Brevo HTTP {resp.status_code}: {resp.text[:300]}")
+
+
+def _send_via_gmail(gmail_user: str, gmail_password: str, to_email: str, subject: str, html: str, text: str):
+    """Gmail SMTP with TLS (port 465)."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"GENTEK <{gmail_user}>"
@@ -815,6 +840,19 @@ def _send_email(to_email: str, subject: str, html: str, text: str = "") -> bool:
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
         smtp.login(gmail_user, gmail_password)
         smtp.sendmail(gmail_user, to_email, msg.as_string())
+
+
+def _send_email(to_email: str, subject: str, html: str, text: str = "") -> bool:
+    """Sends one email: through Brevo when BREVO_API_KEY is set, else Gmail
+    SMTP. Returns False if neither is configured; raises on delivery errors."""
+    brevo_key = _env_value("BREVO_API_KEY")
+    if brevo_key:
+        _send_via_brevo(brevo_key, to_email, subject, html, text)
+        return True
+    gmail_user, gmail_password = _gmail_credentials()
+    if not gmail_user or not gmail_password:
+        return False
+    _send_via_gmail(gmail_user, gmail_password, to_email, subject, html, text)
     return True
 
 

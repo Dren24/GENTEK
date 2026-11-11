@@ -551,6 +551,58 @@ class GooglePasswordTests(OTPTestCase):
         self.assertNotIn(stored, str(r))
 
 
+class EmailTransportTests(unittest.TestCase):
+    """Which transport _send_email uses; network calls are simulated."""
+
+    def env(self, **values):
+        return mock.patch.object(auth, "_env_value", side_effect=lambda name: values.get(name, ""))
+
+    def test_brevo_used_when_key_set(self):
+        resp = mock.Mock(status_code=201, text='{"messageId":"x"}')
+        with self.env(BREVO_API_KEY="xkeysib-1", GMAIL_USER="gentekcaps@gmail.com", GMAIL_APP_PASSWORD="pw"), \
+                mock.patch.object(auth.requests, "post", return_value=resp) as post, \
+                mock.patch.object(auth.smtplib, "SMTP_SSL") as smtp:
+            self.assertTrue(auth._send_email("ana@example.com", "Subj", "<b>hi</b>", "hi"))
+        smtp.assert_not_called()
+        self.assertEqual(post.call_args.args[0], auth.BREVO_URL)
+        self.assertEqual(post.call_args.kwargs["headers"]["api-key"], "xkeysib-1")
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["sender"], {"name": "GENTEK", "email": "gentekcaps@gmail.com"})
+        self.assertEqual(body["to"], [{"email": "ana@example.com"}])
+        self.assertEqual((body["subject"], body["htmlContent"], body["textContent"]), ("Subj", "<b>hi</b>", "hi"))
+
+    def test_brevo_sender_override(self):
+        resp = mock.Mock(status_code=201, text="{}")
+        with self.env(BREVO_API_KEY="k", BREVO_SENDER_EMAIL="noreply@gentek.app", GMAIL_USER="g@gmail.com"), \
+                mock.patch.object(auth.requests, "post", return_value=resp) as post:
+            auth._send_email("ana@example.com", "S", "h")
+        self.assertEqual(post.call_args.kwargs["json"]["sender"]["email"], "noreply@gentek.app")
+
+    def test_brevo_error_raises_with_reason(self):
+        resp = mock.Mock(status_code=400, text='{"message":"sender not valid"}')
+        with self.env(BREVO_API_KEY="k", GMAIL_USER="g@gmail.com"), \
+                mock.patch.object(auth.requests, "post", return_value=resp):
+            with self.assertRaises(RuntimeError) as cm:
+                auth._send_email("ana@example.com", "S", "h")
+        self.assertIn("sender not valid", str(cm.exception))
+        self.assertNotIn("k", str(cm.exception).split("Brevo HTTP")[0])
+
+    def test_gmail_used_without_brevo(self):
+        with self.env(GMAIL_USER="g@gmail.com", GMAIL_APP_PASSWORD="pw"), \
+                mock.patch.object(auth.smtplib, "SMTP_SSL") as smtp, \
+                mock.patch.object(auth.requests, "post") as post:
+            self.assertTrue(auth._send_email("ana@example.com", "S", "h"))
+        post.assert_not_called()
+        smtp.return_value.__enter__.return_value.login.assert_called_once_with("g@gmail.com", "pw")
+
+    def test_nothing_configured(self):
+        with self.env():
+            self.assertFalse(auth._send_email("ana@example.com", "S", "h"))
+            self.assertFalse(auth._smtp_configured())
+        with self.env(BREVO_API_KEY="k"):
+            self.assertTrue(auth._smtp_configured())
+
+
 class TemplateTests(unittest.TestCase):
     def test_templates_have_code_expiry_warning_and_escape_name(self):
         for purpose in ("verify", "login", "reset", "setpw"):
