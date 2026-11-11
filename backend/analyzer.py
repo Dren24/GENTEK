@@ -9,16 +9,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── LLM provider ──────────────────────────────────────────────────────────────
+# ── LLM providers ─────────────────────────────────────────────────────────────
 # Both hosts speak the same OpenAI-compatible chat API; only the endpoint, model
-# id, and key differ. LLM_PROVIDER picks one ("groq" or "huggingface"); when
-# unset, Groq is used if GROQ_API_KEY is configured, else Hugging Face.
-# LLM_MODEL / LLM_API_URL override the preset without a code change.
-#
-# Hugging Face serves GENTEK's documented model, Llama 3.1 8B Instruct. Groq no
-# longer hosts Llama 3.1, so its preset is a temporary free-tier stand-in
-# (gpt-oss-20b) for when the Hugging Face credits are exhausted — it returns
-# the same JSON format, but evaluation results should come from Llama.
+# id, and key differ. Every provider whose key is set joins one fallback chain,
+# in _PROVIDER_ORDER: Hugging Face first (GENTEK's documented model, Llama 3.1
+# 8B Instruct), then Groq as backup (it no longer hosts Llama 3.1, so it serves
+# gpt-oss models — same JSON format; evaluation results should come from Llama).
+# A request falls through to the next model when one is out of credits, has a
+# bad key, or is rate-limited. LLM_PROVIDER restricts the chain to one
+# provider; LLM_MODEL / LLM_API_URL override the first provider's preset.
 _PROVIDERS = {
     "huggingface": {
         "url":     "https://router.huggingface.co/v1/chat/completions",
@@ -49,20 +48,41 @@ def _env(name: str) -> str:
     return os.getenv(name, "").strip()
 
 
-LLM_PROVIDER = _env("LLM_PROVIDER").lower() or ("groq" if _env("GROQ_API_KEY") else "huggingface")
-if LLM_PROVIDER not in _PROVIDERS:
-    print(f"[analyzer] WARNING: unknown LLM_PROVIDER {LLM_PROVIDER!r} — using huggingface", flush=True)
-    LLM_PROVIDER = "huggingface"
-_preset      = _PROVIDERS[LLM_PROVIDER]
-LLM_PARAMS   = _preset.get("params", {})
-LLM_KEY_ENV  = _preset["key_env"]
-LLM_API_KEY  = _env(LLM_KEY_ENV)
-# LLM_MODEL may name one model or a comma-separated fallback list.
-LLM_MODELS   = [m.strip() for m in _env("LLM_MODEL").split(",") if m.strip()] or _preset["models"]
-LLM_MODEL    = LLM_MODELS[0]  # primary — shown in logs and evaluation output
-CHAT_URL     = _env("LLM_API_URL") or _preset["url"]
-print(f"[analyzer] LLM provider: {LLM_PROVIDER} ({' -> '.join(LLM_MODELS)}), key {LLM_KEY_ENV} "
-      f"{'set' if LLM_API_KEY else 'NOT set'}", flush=True)
+_PROVIDER_ORDER = ["huggingface", "groq"]
+
+
+def _build_chain() -> tuple:
+    """(chain, setup_error). chain is the ordered list of models to try, each
+    {provider, model, url, key, params}; setup_error explains an empty chain."""
+    explicit = _env("LLM_PROVIDER").lower()
+    if explicit and explicit not in _PROVIDERS:
+        print(f"[analyzer] WARNING: unknown LLM_PROVIDER {explicit!r} — ignoring it", flush=True)
+        explicit = ""
+    names = [explicit] if explicit else _PROVIDER_ORDER
+    chain = []
+    for i, name in enumerate(names):
+        preset = _PROVIDERS[name]
+        key = _env(preset["key_env"])
+        if not key:
+            continue
+        # LLM_MODEL (one id or a comma-separated list) / LLM_API_URL override the first provider
+        override = [m.strip() for m in _env("LLM_MODEL").split(",") if m.strip()] if i == 0 else []
+        url = (_env("LLM_API_URL") if i == 0 else "") or preset["url"]
+        for model in override or preset["models"]:
+            chain.append({"provider": name, "model": model, "url": url, "key": key,
+                          "params": preset.get("params", {})})
+    if chain:
+        return chain, None
+    needed = " or ".join(_PROVIDERS[n]["key_env"] for n in names)
+    return [], f"{needed} not set"
+
+
+LLM_CHAIN, LLM_SETUP_ERROR = _build_chain()
+LLM_PROVIDER = LLM_CHAIN[0]["provider"] if LLM_CHAIN else "none"   # primary — for logs/evaluation
+LLM_MODEL    = LLM_CHAIN[0]["model"] if LLM_CHAIN else ""
+print("[analyzer] LLM chain: "
+      + (" -> ".join(f"{e['provider']}:{e['model']}" for e in LLM_CHAIN) if LLM_CHAIN else f"none ({LLM_SETUP_ERROR})"),
+      flush=True)
 
 # ── LLM chunking config ────────────────────────────────────────────────────────
 # Llama 3.1 8B's context window is large, but we deliberately keep each request
@@ -663,22 +683,23 @@ class _LLMError(Exception):
     """A chunk's LLM call could not produce a usable answer."""
 
 
-def _call_llm(text: str, model: str = None) -> str:
-    """One chat-completion request; returns the reply content. Raises _LLMError
-    with a readable cause (HTTP status + API message, timeout, bad shape)."""
+def _call_llm(text: str, entry: dict) -> str:
+    """One chat-completion request to one chain entry; returns the reply
+    content. Raises _LLMError with a readable cause (HTTP status + API
+    message, timeout, bad shape)."""
     try:
         resp = requests.post(
-            CHAT_URL,
-            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            entry["url"],
+            headers={"Authorization": f"Bearer {entry['key']}"},
             json={
-                "model": model or LLM_MODEL,
+                "model": entry["model"],
                 "messages": [
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": f"<text>\n{text}\n</text>"},
                 ],
                 "max_tokens": LLM_MAX_TOKENS,
                 "temperature": 0,
-                **LLM_PARAMS,
+                **entry["params"],
             },
             timeout=LLM_TIMEOUT,
         )
@@ -711,11 +732,18 @@ def _call_llm(text: str, model: str = None) -> str:
     return content
 
 
-# model -> time.time() until which it's rate-limited (set when a model asks us
-# to wait longer than LLM_MAX_RETRY_AFTER, e.g. a daily token cap). Requests
-# skip cooling models and go straight to the next one in LLM_MODELS.
+# "provider:model" -> time.time() until which it's skipped. Set when a model
+# asks us to wait longer than LLM_MAX_RETRY_AFTER (e.g. a daily token cap), and
+# for every model of a provider whose key/billing fails (401/402/403) — e.g.
+# Hugging Face out of credits — so later requests go straight to the backup
+# instead of paying for a failing call each time.
 _model_cooldown: Dict[str, float] = {}
-_DEFAULT_COOLDOWN = 60.0  # when a 429 gives no Retry-After
+_DEFAULT_COOLDOWN  = 60.0    # when a 429 gives no Retry-After
+_PROVIDER_COOLDOWN = 600.0   # after a key/billing failure
+
+
+def _entry_id(entry: dict) -> str:
+    return f"{entry['provider']}:{entry['model']}"
 
 
 def _llm_analyze_chunk(text: str, label: str = "1/1") -> tuple:
@@ -725,20 +753,27 @@ def _llm_analyze_chunk(text: str, label: str = "1/1") -> tuple:
     means the model read the text and found no bias) or None if no model could
     analyze it, in which case error explains why; model is the one that answered.
     """
-    last_error = "all models are rate-limited"
+    last_error = "all AI models are unavailable (rate-limited or out of credits)"
     started = time.time()
-    for model in LLM_MODELS:
+    for entry in LLM_CHAIN:
+        model = _entry_id(entry)
         if _model_cooldown.get(model, 0) > time.time():
             continue
         for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
             try:
-                raw = _call_llm(text, model)
+                raw = _call_llm(text, entry)
             except _LLMError as e:
-                last_error = str(e)
-                _log(f"LLM request to {model} failed (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {last_error}")
+                last_error = f"{model}: {e}"
+                _log(f"LLM request to {model} failed (attempt {attempt}/{LLM_MAX_ATTEMPTS}): {e}")
                 status = getattr(e, "status", None)
                 if status in (401, 402, 403):
-                    return None, last_error, None  # key/billing problem — same for every model
+                    # Key/billing problem — applies to every model of this provider
+                    for other in LLM_CHAIN:
+                        if other["provider"] == entry["provider"]:
+                            _model_cooldown[_entry_id(other)] = time.time() + _PROVIDER_COOLDOWN
+                    _log(f"{entry['provider']} unavailable (HTTP {status}); skipping it for "
+                         f"{_PROVIDER_COOLDOWN / 60:.0f} min and trying the next provider")
+                    break
                 if status == 429 and not e.retryable or status == 429 and getattr(e, "retry_after", None) is None:
                     wait = getattr(e, "retry_after", None) or _DEFAULT_COOLDOWN
                     _model_cooldown[model] = time.time() + wait
@@ -784,14 +819,14 @@ def _llm_analyze(text: str) -> tuple:
       - error is a short cause string whenever any chunk failed, else None;
       - models lists the model(s) that answered.
     """
-    if not LLM_API_KEY:
-        _log(f"WARNING: {LLM_KEY_ENV} not set — falling back to rule-based detection only (no contextual/LLM coverage).")
-        return None, f"{LLM_KEY_ENV} not set", []
+    if not LLM_CHAIN:
+        _log(f"WARNING: {LLM_SETUP_ERROR} — falling back to rule-based detection only (no contextual/LLM coverage).")
+        return None, LLM_SETUP_ERROR, []
 
     all_chunks = _chunk_text(text, LLM_CHUNK_CHAR_LIMIT)
     chunks = all_chunks[:LLM_MAX_CHUNKS]
     skipped = len(all_chunks) - len(chunks)
-    _log(f"LLM analysis via {LLM_PROVIDER} ({LLM_MODEL}): {len(text)} chars in {len(chunks)} chunk(s)"
+    _log(f"LLM analysis (primary {LLM_PROVIDER}:{LLM_MODEL}): {len(text)} chars in {len(chunks)} chunk(s)"
          + (f"; {skipped} more chunk(s) over the {LLM_MAX_CHUNKS}-chunk limit NOT sent" if skipped else ""))
     labels = [f"{i}/{len(chunks)}" for i in range(1, len(chunks) + 1)]
 

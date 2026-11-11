@@ -43,7 +43,7 @@ def main() -> int:
     import analyzer  # noqa: PLC0415
 
     if not args.use_llm:
-        analyzer.LLM_API_KEY = ""
+        analyzer.LLM_CHAIN = []
 
     cases = load_cases(args.cases)
     label_correct = 0
@@ -86,7 +86,8 @@ def main() -> int:
 
     print("GENTEK Manual Evaluation")
     print(f"Cases: {total}")
-    print(f"LLM enabled: {f'yes ({analyzer.LLM_PROVIDER}, {analyzer.LLM_MODEL})' if args.use_llm else 'no'}")
+    chain = " -> ".join(f"{x['provider']}:{x['model']}" for x in analyzer.LLM_CHAIN)
+    print(f"LLM enabled: {f'yes ({chain})' if args.use_llm and chain else 'no'}")
     print(f"Label accuracy: {label_correct}/{total} = {label_accuracy:.2%}")
     print(f"Exact detected-term accuracy: {exact_terms_correct}/{total} = {exact_detection_accuracy:.2%}")
     print(f"Detected-term precision: {precision:.2%}")

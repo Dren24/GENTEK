@@ -39,7 +39,7 @@ To show any failing cases:
 python3 backend/evaluate_accuracy.py --show-errors
 ```
 
-To include LLM calls when `HF_API_KEY` (Llama 3.1 8B on Hugging Face) or `GROQ_API_KEY` (temporary gpt-oss-20b stand-in on Groq) is configured:
+To include LLM calls when `HF_API_KEY` (Llama 3.1 8B on Hugging Face, tried first) and/or `GROQ_API_KEY` (gpt-oss backup on Groq) is configured. The output's "LLM enabled" line lists the model chain; results reflect Llama 3.1 only when Hugging Face answered:
 
 ```bash
 python3 backend/evaluate_accuracy.py --use-llm --show-errors
@@ -70,6 +70,8 @@ Known AI-layer limitations observed during live testing:
   ("her child is a boy") is a genuine gender reference.
 - Tagalog and Bisaya are handled by the AI; the lexicon covers only a small set
   of stock phrases in those languages. Other Philippine languages are untested.
-- On Groq's free tier, each model has a daily token cap. GENTEK falls back to a
-  second model when the first is exhausted; when both are, analysis is
+- GENTEK tries Llama 3.1 8B on Hugging Face first, then Groq's gpt-oss models.
+  A provider out of credits or with a bad key is skipped for 10 minutes; a
+  rate-limited model is skipped until its limit resets (Groq's free tier caps
+  tokens per model per day). When every model is unavailable, analysis is
   keyword-only and the UI says so.
