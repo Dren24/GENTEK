@@ -153,6 +153,20 @@ export function AuthProvider({ children }) {
     return startSession(await res.json(), remember)
   }
 
+  // ── resetPassword — POST /auth/reset-password with the single-use reset
+  // token; the backend signs the user in on success ───────────────────────────
+  const resetPassword = async (resetToken, newPassword) => {
+    const res = await fetch('/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: resetToken, new_password: newPassword }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || 'Reset failed')
+    const { message, ...session } = data
+    return session.token ? startSession(session, true) : null
+  }
+
   // ── resendCode — POST /auth/resend-code ───────────────────────────────────
   const resendCode = async (email, purpose) => {
     const res = await fetch('/auth/resend-code', {
@@ -362,7 +376,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
+      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, resetPassword, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,

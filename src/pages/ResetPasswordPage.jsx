@@ -8,10 +8,12 @@ import { useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { LockKey, Eye, EyeSlash, CheckCircle, WarningCircle, X } from '@phosphor-icons/react'
 import GentekMark from '../components/shared/GentekLogo'
+import { useAuth } from '../context/AuthContext'
 
 export default function ResetPasswordPage() {
   const location                = useLocation()
   const navigate                = useNavigate()
+  const { resetPassword }       = useAuth()
   const token                   = location.state?.resetToken || ''
   const email                   = location.state?.email || ''
 
@@ -31,16 +33,13 @@ export default function ResetPasswordPage() {
     if (password !== confirm) { setError('Passwords do not match.'); return }
     setLoading(true)
     try {
-      const res = await fetch('/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, new_password: password }),
-      })
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.detail || 'Reset failed')
+      const signedIn = await resetPassword(token, password)
+      if (signedIn) {
+        // Signed in by the reset — go straight to the workspace
+        navigate('/', { replace: true })
+        return
       }
-      setDone(true)
+      setDone(true)   // older backend: fall back to "go log in"
     } catch (err) {
       setError(err.message)
     } finally {

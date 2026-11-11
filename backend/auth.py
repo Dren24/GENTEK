@@ -980,7 +980,9 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     db.execute(delete(TrustedDevice).where(TrustedDevice.user_id == user.id))
     db.execute(delete(EmailCode).where(EmailCode.user_id == user.id))
     db.commit()
-    return {"message": "Password updated successfully"}
+    # The emailed code just proved the user owns the inbox, so sign them in
+    # directly (and trust this browser) instead of making them log in again.
+    return {"message": "Password updated successfully", **_user_payload(user, db, remember=True, new_device=True)}
 
 
 # ── GET /auth/history/{user_id} — fetch recent analyses for sidebar ───────────

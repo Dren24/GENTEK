@@ -275,6 +275,21 @@ class ForgotPasswordTests(OTPTestCase):
         self.reset(token)
         self.assertEqual(self.login(password="newpass456", device_token=device).json()["purpose"], "login")
 
+    def test_reset_signs_in_and_trusts_only_this_browser(self):
+        old_device = self.verified_user()
+        self.forgot()
+        token = self.verify_reset(self.last_code("reset")).json()["reset_token"]
+        r = self.reset(token).json()
+        self.assertIn("token", r)
+        self.assertIn("device_token", r)
+        self.assertNotIn("password", r)
+        # the reset browser logs in without a code; the old trusted one doesn't
+        self.assertIn("token", self.login(password="newpass456", device_token=r["device_token"]).json())
+        self.assertEqual(self.login(password="newpass456", device_token=old_device).json()["purpose"], "login")
+        # the session token is a real login
+        me = self.client.get(f"/auth/history/{r['id']}", headers={"Authorization": f"Bearer {r['token']}"})
+        self.assertEqual(me.status_code, 200)
+
     def test_reset_verifies_an_unverified_account(self):
         self.signup()
         self.forgot()
