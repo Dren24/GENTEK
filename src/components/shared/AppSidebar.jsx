@@ -3,7 +3,8 @@
 // Two states: expanded (w-64) and collapsed (w-12, icon rail).
 // Collapsed state shows flyout popups for search, pinned, recent, and user menu.
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Plus, ClockCounterClockwise, Lightning, FileText,
@@ -14,29 +15,89 @@ import GentekMark, { GentekWordmark } from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
 import { useDarkMode } from '../../hooks/useDarkMode'
 import ConfirmModal from './ConfirmModal'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
-// ── CollapsedPopup — flyout popup wrapper used in collapsed sidebar ────────────
-// Closes when the user clicks outside it (mousedown listener on document).
-function CollapsedPopup({ onClose, children, className = '' }) {
+// ── CollapsedPopup — flyout panel for the collapsed sidebar's icon rail ───────
+// Rendered in a portal with fixed positioning, beside its icon (anchorRef).
+// It used to be absolutely positioned inside the sidebar's scroll area, which
+// clipped it to the 48px rail on every screen size. Now it:
+//   • stays inside the viewport (8px gutter) on narrow phones,
+//   • shrinks its height to the visible viewport, so the on-screen keyboard
+//     (which shrinks window.visualViewport) never hides its input or results,
+//   • on phones, sits over a dimmed backdrop, so it reads as a separate layer
+//     instead of half-covering the text box; tapping the backdrop closes it.
+// Closes on a click/tap outside, but not on its own icon (the icon toggles).
+const GUTTER = 8
+function CollapsedPopup({ anchorRef, onClose, children, className = '', width = 288 }) {
   const ref = useRef(null)
+  const isMobile = useIsMobile()
+  const [pos, setPos] = useState(null)
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const a = anchorRef.current?.getBoundingClientRect()
+      if (!a) return
+      // Gap is measured from the sidebar's edge, not the icon, so the panel
+      // never sits flush against the rail
+      const railRight = anchorRef.current.closest('aside')?.getBoundingClientRect().right ?? a.right
+      const vv = window.visualViewport
+      const viewW = vv ? vv.width : window.innerWidth
+      const viewH = vv ? vv.height : window.innerHeight
+      const offsetTop = vv ? vv.offsetTop : 0
+      const left = railRight + GUTTER
+      const w = Math.min(width, viewW - left - GUTTER)
+      // Phones: start near the top so the list has room above the keyboard
+      const top = isMobile ? offsetTop + GUTTER : Math.max(GUTTER, a.top)
+      const maxH = offsetTop + viewH - top - GUTTER
+      setPos({ left, top, width: w, maxHeight: Math.max(160, maxH) })
+    }
+    place()
+    const vv = window.visualViewport
+    window.addEventListener('resize', place)
+    vv?.addEventListener('resize', place)
+    vv?.addEventListener('scroll', place)
+    return () => {
+      window.removeEventListener('resize', place)
+      vv?.removeEventListener('resize', place)
+      vv?.removeEventListener('scroll', place)
+    }
+  }, [anchorRef, isMobile, width])
+
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    const h = (e) => {
+      if (ref.current?.contains(e.target) || anchorRef.current?.contains(e.target)) return
+      onClose()
+    }
     document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [onClose])
-  return (
-    <div
-      ref={ref}
-      className={`absolute left-full top-0 ml-2 z-50 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden ${className}`}
-      style={{ animation: 'fadeIn 0.15s ease' }}
-    >
-      {children}
-    </div>
+    document.addEventListener('touchstart', h, { passive: true })
+    const esc = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('mousedown', h)
+      document.removeEventListener('touchstart', h)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [onClose, anchorRef])
+
+  if (!pos) return null
+  return createPortal(
+    <>
+      {isMobile && <div className="fixed inset-0 z-[55] bg-black/30" aria-hidden="true" />}
+      <div
+        ref={ref}
+        role="dialog"
+        className={`fixed z-[60] flex flex-col bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden ${className}`}
+        style={{ left: pos.left, top: pos.top, width: pos.width, maxHeight: pos.maxHeight, animation: 'fadeIn 0.15s ease' }}
+      >
+        {children}
+      </div>
+    </>,
+    document.body,
   )
 }
 
 // ── SearchPopup — flyout with fuzzy search over history and New Analysis button ──
-function SearchPopup({ items, onClose, onNew, onSelect }) {
+function SearchPopup({ anchorRef, items, onClose, onNew, onSelect }) {
   const [q, setQ] = useState('')
   const filtered = q.trim()
     ? items.filter(r => r.label.toLowerCase().includes(q.toLowerCase()))
@@ -44,19 +105,20 @@ function SearchPopup({ items, onClose, onNew, onSelect }) {
   const groups = ['Today', 'Yesterday', 'Previous 7 Days']
 
   return (
-    <CollapsedPopup onClose={onClose} className="w-72">
+    <CollapsedPopup anchorRef={anchorRef} onClose={onClose} width={288}>
       {/* Search input row with clear X */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-700">
+      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-gray-700">
         <MagnifyingGlass size={14} className="text-gray-400 flex-shrink-0" />
         <input
           autoFocus
           value={q}
           onChange={e => setQ(e.target.value)}
           placeholder="Search analyses..."
-          className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+          aria-label="Search analyses"
+          className="flex-1 min-w-0 bg-transparent text-base sm:text-sm text-white placeholder-gray-500 outline-none"
         />
         {/* Close search popup button */}
-        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
+        <button onClick={onClose} aria-label="Close search" className="text-gray-500 hover:text-gray-300 transition-colors p-1">
           <X size={13} weight="bold" />
         </button>
       </div>
@@ -64,14 +126,15 @@ function SearchPopup({ items, onClose, onNew, onSelect }) {
       {/* New Analysis shortcut button at top of results */}
       <button
         onClick={() => { onNew(); onClose() }}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors border-b border-gray-700"
+        className="flex-shrink-0 w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors border-b border-gray-700"
       >
         <PencilSimple size={14} className="text-gray-400" />
         New Analysis
       </button>
 
-      {/* History results grouped by Today / Yesterday / Previous 7 Days */}
-      <div className="max-h-72 overflow-y-auto py-1">
+      {/* History results grouped by Today / Yesterday / Previous 7 Days —
+          fills the remaining height (capped above the keyboard), then scrolls */}
+      <div className="flex-1 min-h-0 max-h-72 overflow-y-auto py-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-gray-500 px-4 py-3">{items.length === 0 ? 'No analyses yet.' : 'No results found.'}</p>
         ) : (
@@ -104,10 +167,10 @@ function SearchPopup({ items, onClose, onNew, onSelect }) {
 }
 
 // ── PinnedPopup — flyout showing only pinned analyses (pushpin fill icon) ─────
-function PinnedPopup({ pinnedItems, onClose, onSelect }) {
+function PinnedPopup({ anchorRef, pinnedItems, onClose, onSelect }) {
   return (
-    <CollapsedPopup onClose={onClose} className="w-60">
-      <div className="p-3">
+    <CollapsedPopup anchorRef={anchorRef} onClose={onClose} width={240}>
+      <div className="p-3 overflow-y-auto">
         <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Pinned</p>
         {pinnedItems.length === 0 ? (
           <p className="text-xs text-gray-500 px-1 py-2">No pinned analyses yet.</p>
@@ -128,15 +191,15 @@ function PinnedPopup({ pinnedItems, onClose, onSelect }) {
 }
 
 // ── RecentPopup — flyout showing all (non-pinned) recent analyses ──────────────
-function RecentPopup({ items, onClose, onSelect }) {
+function RecentPopup({ anchorRef, items, onClose, onSelect }) {
   return (
-    <CollapsedPopup onClose={onClose} className="w-64">
-      <div className="p-3">
+    <CollapsedPopup anchorRef={anchorRef} onClose={onClose} width={256}>
+      <div className="p-3 overflow-y-auto">
         <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Recents</p>
         {items.length === 0 ? (
           <p className="text-xs text-gray-500 px-1 py-2">No analyses yet. Run one to see history.</p>
         ) : (
-          <div className="space-y-0.5 max-h-80 overflow-y-auto">
+          <div className="space-y-0.5">
             {items.map(r => (
               <button key={r.id} onClick={() => { onSelect(r); onClose() }} className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left hover:bg-gray-700 transition-colors">
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.dot}`} />
@@ -219,11 +282,17 @@ export default function AppSidebar() {
   const [activePopup, setActivePopup]     = useState(null)   // 'search' | 'pinned' | 'recent' | 'user' | null
   const [logoHover, setLogoHover]         = useState(false)  // swap GENTEK mark → expand icon on hover
   const [confirmDeleteId, setConfirmDeleteId] = useState(null) // id of item pending delete confirmation
+  const isMobile   = useIsMobile()
+  const searchRef  = useRef(null)
+  const pinnedRef  = useRef(null)
+  const recentRef  = useRef(null)
 
   // ── Hidden for guests — they use the top Navbar instead ──────────────────
   if (!user) return null
 
-  const go        = (path, state)  => { navigate(path, state ? { state } : undefined); setActivePopup(null) }
+  // On phones the open sidebar is an overlay drawer — close it after navigating
+  const closeDrawer = () => { if (isMobile && sidebarOpen) toggleSidebar() }
+  const go        = (path, state)  => { navigate(path, state ? { state } : undefined); setActivePopup(null); closeDrawer() }
   const loadText  = (item)         => go('/', { loadText: item.text, historyId: item.id })
   const togglePin = (id)           => setPinned(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
   const toggle    = (name)         => setActivePopup(p => p === name ? null : name)
@@ -234,9 +303,14 @@ export default function AppSidebar() {
 
   return (
     <>
+    {/* Phones: the open sidebar overlays the page — dim it; tap to close */}
+    {isMobile && sidebarOpen && (
+      <div className="fixed inset-0 z-[39] bg-black/40" onClick={toggleSidebar} aria-hidden="true" />
+    )}
     <aside
       className={`
         fixed top-0 left-0 bottom-0 z-40 flex flex-col
+        ${isMobile && sidebarOpen ? 'shadow-2xl' : ''}
         bg-gray-50 dark:bg-gray-900
         border-r border-gray-200 dark:border-gray-800
         transition-all duration-300 ease-in-out overflow-visible
@@ -252,7 +326,7 @@ export default function AppSidebar() {
         {sidebarOpen ? (
           <>
             {/* GENTEK wordmark links home */}
-            <Link to="/" className="flex-1 min-w-0 pl-1">
+            <Link to="/" onClick={closeDrawer} className="flex-1 min-w-0 pl-1">
               <GentekWordmark size={30} textSize="text-sm" />
             </Link>
             {/* Collapse sidebar button — SidebarSimple icon */}
@@ -283,7 +357,7 @@ export default function AppSidebar() {
         {/* New Analysis button — always visible in both states */}
         <div className={`mb-1 ${sidebarOpen ? 'px-2' : 'px-1.5'}`}>
           <button
-            onClick={() => { navigate('/', { state: { newAnalysis: true } }); setActivePopup(null) }}
+            onClick={() => { navigate('/', { state: { newAnalysis: true } }); setActivePopup(null); closeDrawer() }}
             title={!sidebarOpen ? 'New Analysis' : undefined}
             className={`w-full flex items-center gap-2.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm rounded-xl transition-all shadow-btn ${sidebarOpen ? 'px-3 py-2.5' : 'justify-center p-2.5'}`}
           >
@@ -384,7 +458,7 @@ export default function AppSidebar() {
           <div className="px-1.5 space-y-0.5 mt-1">
 
             {/* Search icon — opens SearchPopup flyout */}
-            <div className="relative">
+            <div className="relative" ref={searchRef}>
               <button
                 title="Search"
                 onClick={() => toggle('search')}
@@ -394,6 +468,7 @@ export default function AppSidebar() {
               </button>
               {activePopup === 'search' && (
                 <SearchPopup
+                  anchorRef={searchRef}
                   items={history}
                   onClose={() => setActivePopup(null)}
                   onNew={() => { navigate('/', { state: { newAnalysis: true } }); setActivePopup(null) }}
@@ -403,7 +478,7 @@ export default function AppSidebar() {
             </div>
 
             {/* Pushpin icon — opens PinnedPopup flyout (fill when items exist) */}
-            <div className="relative">
+            <div className="relative" ref={pinnedRef}>
               <button
                 title="Pinned"
                 onClick={() => toggle('pinned')}
@@ -412,12 +487,12 @@ export default function AppSidebar() {
                 <PushPin size={18} weight={pinnedItems.length > 0 ? 'fill' : 'regular'} />
               </button>
               {activePopup === 'pinned' && (
-                <PinnedPopup pinnedItems={pinnedItems} onClose={() => setActivePopup(null)} onSelect={loadText} />
+                <PinnedPopup anchorRef={pinnedRef} pinnedItems={pinnedItems} onClose={() => setActivePopup(null)} onSelect={loadText} />
               )}
             </div>
 
             {/* Clock icon — opens RecentPopup flyout */}
-            <div className="relative">
+            <div className="relative" ref={recentRef}>
               <button
                 title="Recent"
                 onClick={() => toggle('recent')}
@@ -426,7 +501,7 @@ export default function AppSidebar() {
                 <ClockCounterClockwise size={18} />
               </button>
               {activePopup === 'recent' && (
-                <RecentPopup items={history} onClose={() => setActivePopup(null)} onSelect={loadText} />
+                <RecentPopup anchorRef={recentRef} items={history} onClose={() => setActivePopup(null)} onSelect={loadText} />
               )}
             </div>
 

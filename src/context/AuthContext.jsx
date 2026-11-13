@@ -6,6 +6,7 @@
 // History is loaded from the backend on login.
 
 import { createContext, useContext, useState, useEffect } from 'react'
+import { isMobileViewport } from '../hooks/useIsMobile'
 
 const AuthContext = createContext(null)
 
@@ -80,7 +81,8 @@ export function AuthProvider({ children }) {
   const [lastDeletedId, setLastDeletedId] = useState(null)
 
   // ── Sidebar open/collapsed state ──────────────────────────────────────────
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Starts open on desktop; on phones it's an overlay drawer, so it starts closed
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobileViewport())
 
   // ── Pricing modal open/closed state ──────────────────────────────────────
   const [pricingOpen, setPricingOpen] = useState(false)

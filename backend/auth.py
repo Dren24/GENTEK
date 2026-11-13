@@ -208,6 +208,8 @@ _LIMITS = {
     "verify:ip":    (40, 15 * 60),   # code guesses from one IP
     "login:ip":     (30, 15 * 60),   # password attempts from one IP
     "cooldown":     (1, CODE_RESEND_SECONDS),  # one code request per address+purpose
+    "contact:ip":   (5, 60 * 60),    # contact-form messages from one IP
+    "contact:email": (3, 60 * 60),   # contact-form messages from one sender address
 }
 
 
@@ -805,7 +807,7 @@ def _gmail_credentials() -> tuple:
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
 
-def _send_via_brevo(api_key: str, to_email: str, subject: str, html: str, text: str):
+def _send_via_brevo(api_key: str, to_email: str, subject: str, html: str, text: str, reply_to: Optional[str] = None):
     """Brevo's transactional email API over HTTPS. Hosts that block outgoing
     mail ports (Render's free plan blocks SMTP) still allow this. The sender
     address must be verified in Brevo; it defaults to GMAIL_USER."""
@@ -820,6 +822,8 @@ def _send_via_brevo(api_key: str, to_email: str, subject: str, html: str, text: 
     }
     if text:
         body["textContent"] = text
+    if reply_to:
+        body["replyTo"] = {"email": reply_to}
     resp = requests.post(BREVO_URL, headers={"api-key": api_key, "accept": "application/json"},
                          json=body, timeout=15)
     if resp.status_code >= 300:
@@ -828,12 +832,15 @@ def _send_via_brevo(api_key: str, to_email: str, subject: str, html: str, text: 
         raise RuntimeError(f"Brevo HTTP {resp.status_code}: {resp.text[:300]}")
 
 
-def _send_via_gmail(gmail_user: str, gmail_password: str, to_email: str, subject: str, html: str, text: str):
+def _send_via_gmail(gmail_user: str, gmail_password: str, to_email: str, subject: str, html: str, text: str,
+                    reply_to: Optional[str] = None):
     """Gmail SMTP with TLS (port 465)."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"GENTEK <{gmail_user}>"
     msg["To"]      = to_email
+    if reply_to:
+        msg["Reply-To"] = reply_to
     if text:
         msg.attach(MIMEText(text, "plain"))  # plain first, HTML preferred by clients
     msg.attach(MIMEText(html, "html"))
@@ -842,17 +849,17 @@ def _send_via_gmail(gmail_user: str, gmail_password: str, to_email: str, subject
         smtp.sendmail(gmail_user, to_email, msg.as_string())
 
 
-def _send_email(to_email: str, subject: str, html: str, text: str = "") -> bool:
+def _send_email(to_email: str, subject: str, html: str, text: str = "", reply_to: Optional[str] = None) -> bool:
     """Sends one email: through Brevo when BREVO_API_KEY is set, else Gmail
     SMTP. Returns False if neither is configured; raises on delivery errors."""
     brevo_key = _env_value("BREVO_API_KEY")
     if brevo_key:
-        _send_via_brevo(brevo_key, to_email, subject, html, text)
+        _send_via_brevo(brevo_key, to_email, subject, html, text, reply_to)
         return True
     gmail_user, gmail_password = _gmail_credentials()
     if not gmail_user or not gmail_password:
         return False
-    _send_via_gmail(gmail_user, gmail_password, to_email, subject, html, text)
+    _send_via_gmail(gmail_user, gmail_password, to_email, subject, html, text, reply_to)
     return True
 
 
@@ -1011,3 +1018,65 @@ def get_history(user_id: int, db: Session = Depends(get_db), current_user: dict 
         }
         for item in items
     ]
+
+
+# ── POST /auth/contact — Contact page form → GENTEK's inbox ───────────────────
+# Sends the visitor's message to CONTACT_EMAIL (default: the GMAIL_USER inbox,
+# gentekcaps@gmail.com) through the same transport as verification codes
+# (Brevo on Render, Gmail SMTP locally). Reply-To is the visitor's address, so
+# answering is just "Reply". Rate-limited per IP and per sender address.
+CONTACT_SUBJECTS = {
+    "general": "General Inquiry", "partnership": "Partnership / Collaboration",
+    "feedback": "Feedback / Suggestions", "bug": "Bug Report",
+    "enterprise": "Enterprise / Team Plan", "other": "Other",
+}
+_EMAIL_RE = re.compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$")
+
+
+class ContactRequest(BaseModel):
+    name: str
+    email: str
+    subject: str
+    message: str
+
+
+@router.post("/contact")
+def contact(req: ContactRequest, request: Request):
+    name, email, message = req.name.strip(), req.email.strip(), req.message.strip()
+    if not name or len(name) > 100:
+        raise HTTPException(status_code=400, detail="Please enter your name (up to 100 characters).")
+    if len(email) > 254 or not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+    if req.subject not in CONTACT_SUBJECTS:
+        raise HTTPException(status_code=400, detail="Please choose a subject.")
+    if not message or len(message) > 5000:
+        raise HTTPException(status_code=400, detail="Please write a message (up to 5,000 characters).")
+    _rate_limit("contact:ip", _client_ip(request))
+    _rate_limit("contact:email", email)
+
+    to = _env_value("CONTACT_EMAIL") or _env_value("GMAIL_USER") or _env_value("BREVO_SENDER_EMAIL")
+    if not to or not _smtp_configured():
+        raise HTTPException(status_code=503, detail="Messages can't be sent right now. Please email us directly.")
+    topic = CONTACT_SUBJECTS[req.subject]
+    # Header values: no line breaks (blocks header injection via the name)
+    safe_name = " ".join(name.split())
+    subject = f"[GENTEK Contact] {topic} — from {safe_name}"
+    html = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+      <p style="font-size:12px;color:#0D9488;font-weight:700;letter-spacing:1px;margin:0 0 6px">GENTEK CONTACT FORM</p>
+      <h2 style="font-size:18px;color:#111827;margin:0 0 16px">{escape(topic)}</h2>
+      <table style="font-size:14px;color:#374151;margin-bottom:16px">
+        <tr><td style="padding:2px 12px 2px 0;color:#6B7280">Name</td><td>{escape(safe_name)}</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#6B7280">Email</td><td>{escape(email)}</td></tr>
+      </table>
+      <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;color:#111827;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:10px;padding:14px">{escape(message)}</div>
+      <p style="font-size:12px;color:#9CA3AF;margin-top:16px">Reply to this email to answer {escape(safe_name)} directly.</p>
+    </div>
+    """
+    text = f"{topic}\nFrom: {safe_name} <{email}>\n\n{message}"
+    try:
+        _send_email(to, subject, html, text, reply_to=email)
+    except Exception as e:
+        print(f"[contact] failed to send message from {email}: {type(e).__name__}: {e}", flush=True)
+        raise HTTPException(status_code=503, detail="We couldn't send your message. Please try again in a few minutes.")
+    return {"message": "Message sent"}

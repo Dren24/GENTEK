@@ -1,27 +1,44 @@
 // ── ContactPage — contact form + info sidebar ─────────────────────────────────
-// Two-column layout: left (2/5) has email, location, social links, quick links;
+// Two-column layout: left (2/5) has the contact email and quick links;
 // right (3/5) has the contact form or a success screen after submit.
-// Form submit is simulated with setTimeout — no real backend endpoint yet.
+// The form posts to /auth/contact, which emails the message to GENTEK's inbox
+// (gentekcaps@gmail.com) with the visitor's address as Reply-To.
 
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { EnvelopeSimple, MapPin, GithubLogo, TwitterLogo, LinkedinLogo, ArrowRight, CheckCircle } from '@phosphor-icons/react'
+import { EnvelopeSimple, ArrowRight, CheckCircle } from '@phosphor-icons/react'
 
 export default function ContactPage() {
   const [form, setForm]     = useState({ name: '', email: '', subject: '', message: '' })
   const [sent, setSent]     = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
 
   // ── Controlled form field update handler ─────────────────────────────────
   function handleChange(e) {
     setForm({ ...form, [e.target.name]: e.target.value })
+    setError('')
   }
 
-  // ── handleSubmit — simulates a 1.4s "sending" state then shows success ───
-  function handleSubmit(e) {
+  // ── handleSubmit — sends the message to GENTEK's inbox ───────────────────
+  async function handleSubmit(e) {
     e.preventDefault()
     setLoading(true)
-    setTimeout(() => { setLoading(false); setSent(true) }, 1400)
+    setError('')
+    try {
+      const res = await fetch('/auth/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || "We couldn't send your message. Please try again.")
+      setSent(true)
+    } catch (err) {
+      setError(err.message === 'Failed to fetch' ? "We couldn't reach GENTEK. Check your connection and try again." : err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -56,43 +73,8 @@ export default function ContactPage() {
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-0.5">Email</p>
-                    <p className="text-sm text-gray-400 dark:text-gray-500">support@gentek.ai</p>
+                    <a href="mailto:gentekcaps@gmail.com" className="text-sm text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:underline break-all transition-colors">gentekcaps@gmail.com</a>
                   </div>
-                </div>
-
-                {/* Location row */}
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <MapPin size={18} weight="duotone" className="text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-0.5">Location</p>
-                    <p className="text-sm text-gray-400 dark:text-gray-500">Remote — Available Worldwide</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Social media links — GitHub, Twitter, LinkedIn */}
-              <div className="card p-6">
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Follow GENTEK</h3>
-                <div className="flex flex-col gap-3">
-                  {[
-                    { icon: GithubLogo,   label: 'GitHub',   handle: '@gentek-nlp',    color: 'text-gray-700 dark:text-gray-300', bg: 'bg-gray-50 dark:bg-gray-700' },
-                    { icon: TwitterLogo,  label: 'Twitter',  handle: '@gentekproject', color: 'text-sky-600',                     bg: 'bg-sky-50 dark:bg-sky-900/30' },
-                    { icon: LinkedinLogo, label: 'LinkedIn', handle: 'GENTEK Research',color: 'text-blue-700',                    bg: 'bg-blue-50 dark:bg-blue-900/30' },
-                  ].map(({ icon: Icon, label, handle, color, bg }) => (
-                    <div key={label} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group">
-                      <div className={`w-9 h-9 rounded-xl ${bg} flex items-center justify-center flex-shrink-0`}>
-                        <Icon size={18} weight="fill" className={color} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">{handle}</p>
-                      </div>
-                      {/* Arrow reveals on hover */}
-                      <ArrowRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:text-brand-500 ml-auto transition-colors" />
-                    </div>
-                  ))}
                 </div>
               </div>
 
@@ -129,7 +111,7 @@ export default function ContactPage() {
                   </div>
                   <h3 className="text-xl font-bold text-gray-900 dark:text-white">Message Sent!</h3>
                   <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs leading-relaxed">
-                    Thank you for reaching out. The GENTEK team will review your message and get back to you soon.
+                    Thank you for reaching out. The GENTEK team will reply to {form.email || 'your email'} soon.
                   </p>
                   {/* Reset form and allow sending another */}
                   <button
@@ -207,6 +189,12 @@ export default function ContactPage() {
                   </div>
 
                   {/* Submit button — spinner shown during loading state */}
+                  {/* Send error (validation, rate limit, or email delivery) */}
+                  {error && (
+                    <p role="alert" className="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-4 py-2.5">
+                      {error}
+                    </p>
+                  )}
                   <button
                     type="submit"
                     disabled={loading}

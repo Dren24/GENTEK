@@ -90,14 +90,28 @@ export default function AboutPage() {
               </div>
             </div>
 
-            {/* Product stats card — photo + key numbers table */}
+            {/* Product stats card — analysis preview + key numbers table */}
             <div className="reveal reveal-delay-2">
               <div className="card p-6 space-y-5">
-                <img
-                  src="https://picsum.photos/seed/inclusive-writing-workspace/600/300"
-                  alt="Inclusive writing with GENTEK"
-                  className="w-full h-44 object-cover rounded-xl"
-                />
+                {/* What GENTEK does, shown with its own highlight styles. This
+                    replaces a random stock photo (picsum.photos), which showed
+                    unrelated scenery such as a river. */}
+                <div
+                  className="rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-4"
+                  role="img"
+                  aria-label="Example of GENTEK highlighting gender-biased words in a sentence and suggesting inclusive alternatives"
+                >
+                  <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Analysis preview</p>
+                  <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">
+                    The <mark className="bias-male">chairman</mark> asked every engineer to update <mark className="bias-male">his</mark> report,
+                    while the <mark className="bias-female">stewardess</mark> handled the guests.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+                    <span className="px-2 py-0.5 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">chairman → <span className="font-semibold text-brand-600 dark:text-brand-400">chairperson</span></span>
+                    <span className="px-2 py-0.5 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">his → <span className="font-semibold text-brand-600 dark:text-brand-400">their</span></span>
+                    <span className="px-2 py-0.5 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">stewardess → <span className="font-semibold text-brand-600 dark:text-brand-400">flight attendant</span></span>
+                  </div>
+                </div>
                 <div>
                   <p className="font-bold text-gray-900 dark:text-white mb-0.5">GENTEK — AI Gender Bias Detector</p>
                   <p className="text-sm text-gray-400 dark:text-gray-500">Helping writers communicate more fairly, every day.</p>

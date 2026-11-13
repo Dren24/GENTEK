@@ -4,6 +4,7 @@
 // (like /detector) bypass the shared shell entirely.
 
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useIsMobile } from './hooks/useIsMobile'
 import { useEffect } from 'react'
 import Navbar        from './components/shared/Navbar'
 import Footer        from './components/shared/Footer'
@@ -70,8 +71,11 @@ export default function App() {
   const hideShell   = HIDE_SHELL.includes(pathname)
   const showSidebar = user && !hideShell
 
-  // ── Sidebar width: 256px when open, 48px collapsed icon rail ─────────────
-  const sidebarW = showSidebar ? (sidebarOpen ? 256 : 48) : 0
+  // ── Sidebar width: 256px when open, 48px collapsed icon rail. On phones the
+  // open sidebar overlays the page as a drawer, so the page only ever makes
+  // room for the 48px rail instead of being squeezed to ~120px. ────────────
+  const isMobile = useIsMobile()
+  const sidebarW = showSidebar ? (sidebarOpen && !isMobile ? 256 : 48) : 0
 
   return (
     <>

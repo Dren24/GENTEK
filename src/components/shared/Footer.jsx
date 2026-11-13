@@ -3,7 +3,7 @@
 // Three sections: CTA strip (brand-colored top band), main grid, bottom bar.
 
 import { Link } from 'react-router-dom'
-import { ArrowRight, GithubLogo, TwitterLogo, LinkedinLogo } from '@phosphor-icons/react'
+import { ArrowRight } from '@phosphor-icons/react'
 import { GentekWordmark, BrainIcon } from './GentekLogo'
 import { useAuth } from '../../context/AuthContext'
 
@@ -100,19 +100,13 @@ export default function Footer() {
         </div>
       </div>
 
-      {/* ── Bottom bar — copyright + social icons ─────────────────────────── */}
+      {/* ── Bottom bar — copyright + legal links ───────────────────────────── */}
       <div className="border-t border-gray-100 dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
             <span>&copy; 2026 GENTEK. All rights reserved.</span>
             <Link to="/terms"   className="hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Terms</Link>
             <Link to="/privacy" className="hover:text-brand-600 dark:hover:text-brand-400 transition-colors">Privacy</Link>
-          </div>
-          {/* Social icon links */}
-          <div className="flex items-center gap-3">
-            <a href="#" className="text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"><GithubLogo size={16} /></a>
-            <a href="#" className="text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"><TwitterLogo size={16} /></a>
-            <a href="#" className="text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"><LinkedinLogo size={16} /></a>
           </div>
         </div>
       </div>

@@ -618,6 +618,61 @@ class EmailTransportTests(unittest.TestCase):
             self.assertTrue(auth._smtp_configured())
 
 
+class ContactFormTests(OTPTestCase):
+    """Contact page form → GENTEK inbox. Delivery is captured, not sent."""
+
+    def setUp(self):
+        super().setUp()
+        self.mail = []
+        mock.patch.object(auth, "_send_email",
+                          side_effect=lambda to, subj, html, text="", reply_to=None:
+                          self.mail.append(dict(to=to, subj=subj, html=html, text=text, reply_to=reply_to)) or True).start()
+        mock.patch.object(auth, "_smtp_configured", return_value=True).start()
+        mock.patch.object(auth, "_env_value", side_effect=lambda n: {"GMAIL_USER": "gentekcaps@gmail.com"}.get(n, "")).start()
+
+    def send(self, **over):
+        body = {"name": "Juan dela Cruz", "email": "juan@example.com", "subject": "feedback",
+                "message": "Great tool!\nThanks."}
+        body.update(over)
+        return self.client.post("/auth/contact", json=body)
+
+    def test_message_goes_to_gentek_inbox_with_reply_to_sender(self):
+        self.assertEqual(self.send().status_code, 200)
+        m = self.mail[-1]
+        self.assertEqual(m["to"], "gentekcaps@gmail.com")
+        self.assertEqual(m["reply_to"], "juan@example.com")
+        self.assertIn("Feedback / Suggestions", m["subj"])
+        self.assertIn("Juan dela Cruz", m["subj"])
+        self.assertIn("Great tool!", m["text"])
+
+    def test_html_in_message_is_escaped(self):
+        self.send(message="<script>alert(1)</script>", name="<b>Eve</b>")
+        self.assertNotIn("<script>", self.mail[-1]["html"])
+        self.assertIn("&lt;script&gt;", self.mail[-1]["html"])
+
+    def test_line_breaks_in_name_cannot_inject_headers(self):
+        self.send(name="Eve\r\nBcc: victim@example.com")
+        self.assertNotIn("\n", self.mail[-1]["subj"])
+        self.assertNotIn("\r", self.mail[-1]["subj"])
+
+    def test_validation(self):
+        for over in ({"name": ""}, {"email": "not-an-email"}, {"subject": "spam"}, {"message": "  "},
+                     {"message": "x" * 5001}, {"email": "a@b.com\nBcc: x@y.com"}):
+            self.assertEqual(self.send(**over).status_code, 400, over)
+        self.assertEqual(self.mail, [])
+
+    def test_rate_limited(self):
+        for _ in range(3):
+            self.assertEqual(self.send().status_code, 200)
+        self.assertEqual(self.send().status_code, 429)
+
+    def test_delivery_failure_reported(self):
+        auth._send_email.side_effect = RuntimeError("Brevo HTTP 401")
+        r = self.send()
+        self.assertEqual(r.status_code, 503)
+        self.assertNotIn("Brevo", r.json()["detail"])
+
+
 class TemplateTests(unittest.TestCase):
     def test_templates_have_code_expiry_warning_and_escape_name(self):
         for purpose in ("verify", "login", "reset", "setpw"):
