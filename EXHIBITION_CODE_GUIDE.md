@@ -190,7 +190,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 
 | File / function | What to know |
 |---|---|
-| `utils/biasHighlight.js` `highlightHtml()` | Builds the colored `<mark>` highlighting in one pass over the text; `fixOne()` replaces just one word; `rewriteAll()` applies every suggestion |
+| `utils/biasHighlight.js` `highlightHtml()` | Builds the colored `<mark>` highlighting in one pass over the text (each mark knows its exact position); `fixRange()` replaces only the clicked occurrence; `rewriteAll()` applies every suggestion; `matchCase()` / `capitalizeSentences()` make replacements correctly capitalized (sentence starts, "Chairman" → "Chairperson") |
 | `utils/biasScore.js` `biasBreakdown()` | Same Male/Female/Neutral formula as the backend's `bias_breakdown()` |
 | `components/shared/AuthModal.jsx` | All login screens: Log in, Sign up, enter code, forgot password, create password |
 | `components/shared/AppSidebar.jsx` | History list, search, pinned items; on phones it slides over the page |

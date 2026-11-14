@@ -75,6 +75,83 @@ export function highlightHtml(text, detected) {
   return html + escapeHtml(text.slice(pos))
 }
 
+// ── Capitalization ─────────────────────────────────────────────────────────────
+// Replacements must produce correctly capitalized text (real letters, not CSS):
+//   • at a sentence start (start of text, a new line, or after . ? !) the
+//     inserted word gets a capital first letter: "male employee" → "Female employee"
+//   • a replaced word that was Capitalized or ALL CAPS keeps that style:
+//     "Chairman" → "Chairperson", "MANKIND" → "HUMANKIND"
+//   • mid-sentence, a suggestion that arrives Capitalized ("People can excel")
+//     is lowered, unless its first word is a proper noun — mixed case like
+//     "iPhone", "I", or a word the text itself writes capitalized mid-sentence.
+// capitalizeSentences() (used by Rewrite Text) also capitalizes the first
+// word of every sentence in the whole text.
+
+// Common abbreviations whose period does NOT end a sentence ("e.g. the ...")
+const ABBREVIATIONS = new Set(['e.g', 'i.e', 'etc', 'vs', 'a.m', 'p.m', 'mr', 'mrs', 'ms', 'dr', 'st', 'no', 'fig', 'approx'])
+
+// ── isSentenceStart — true if position `i` begins a sentence: only spaces,
+// quotes or opening brackets lie between it and the start of the text, a line
+// break, or sentence-ending punctuation (that isn't an abbreviation). ─────────
+export function isSentenceStart(text, i) {
+  let j = i - 1
+  while (j >= 0 && /[\s"'“‘(\[]/.test(text[j]) && text[j] !== '\n') j--
+  if (j < 0 || text[j] === '\n') return true
+  if (!/[.?!…]/.test(text[j])) return false
+  if (text[j] === '.') {
+    // "e.g. the", "Dr. smith" — the period belongs to an abbreviation
+    const before = text.slice(0, j).match(/([A-Za-z.]+)$/)
+    if (before && ABBREVIATIONS.has(before[1].toLowerCase())) return false
+  }
+  // The punctuation must be followed by whitespace before position i
+  return /\s/.test(text.slice(j + 1, i))
+}
+
+const firstWord = (s) => (s.match(/[A-Za-zÀ-ÿ'’]+/) || [''])[0]
+const upperFirst = (s) => s.replace(/[A-Za-zÀ-ÿ]/, c => c.toUpperCase())
+const lowerFirst = (s) => s.replace(/[A-Za-zÀ-ÿ]/, c => c.toLowerCase())
+// Mixed case inside the word ("iPhone", "McDonald", "GENTEK") — never re-case it
+const hasInnerCaps = (w) => /[a-zà-ÿ]/.test(w) && /.[A-ZÀ-Þ]/.test(w)
+
+// A word is treated as a proper noun if the text writes it capitalized
+// somewhere that is NOT a sentence start ("... from Manila ...").
+function isProperNounIn(text, word) {
+  if (!word || word === 'I' || hasInnerCaps(word)) return true
+  const rx = new RegExp(`(?<![\\w'’])${escapeRx(word)}(?![\\w'’])`, 'g')
+  for (const m of text.matchAll(rx)) {
+    if (/^[A-ZÀ-Þ]/.test(m[0]) && !isSentenceStart(text, m.index)) return true
+  }
+  return false
+}
+
+// ── matchCase — the suggestion, capitalized for where it is being inserted.
+// `original` is the text it replaces; `start` its position in `text`. ─────────
+export function matchCase(suggestion, text, start, original) {
+  if (!suggestion) return suggestion
+  const w = firstWord(suggestion)
+  // ALL-CAPS original (and more than one letter) → ALL-CAPS replacement
+  if (/[A-Z]/.test(original) && original === original.toUpperCase() && /[A-Z].*[A-Z]/.test(original)) {
+    return suggestion.toUpperCase()
+  }
+  if (isSentenceStart(text, start) || /^[A-ZÀ-Þ]/.test(firstWord(original))) {
+    return hasInnerCaps(w) ? suggestion : upperFirst(suggestion)
+  }
+  // Mid-sentence: lower a capitalized first word unless it's a proper noun
+  if (/^[A-ZÀ-Þ][a-zà-ÿ'’]*$/.test(w) && w !== 'I' && !isProperNounIn(text, w)) return lowerFirst(suggestion)
+  return suggestion
+}
+
+// ── capitalizeSentences — capital letter at the start of every sentence.
+// Words with inner capitals ("iPhone") are left alone. Length never changes,
+// so highlight ranges stay valid. ───────────────────────────────────────────────
+export function capitalizeSentences(text) {
+  return text.replace(/[A-Za-zÀ-ÿ][\w'’-]*/g, (word, i) => {
+    if (!/^[a-zà-ÿ]/.test(word) || hasInnerCaps(word) || !isSentenceStart(text, i)) return word
+    const up = upperFirst(word)
+    return up.length === word.length ? up : word
+  })
+}
+
 // ── applyEdits — replaces non-overlapping, sorted ranges in one pass. Returns
 // the new text plus mapSpan, which moves a range from the old text to the new
 // one (null if an edit touched it), so other items' spans stay accurate. ──────
@@ -106,7 +183,8 @@ function applyEdits(text, edits) {
 // so other copies of the same word remain highlighted. ─────────────────────────
 export function fixRange(text, detected, start, end, suggestion) {
   if (!(start >= 0 && end <= text.length && start < end)) return { text, detected }
-  const { text: newText, mapSpan } = applyEdits(text, [{ start, end, replacement: suggestion }])
+  const replacement = matchCase(suggestion, text, start, text.slice(start, end))
+  const { text: newText, mapSpan } = applyEdits(text, [{ start, end, replacement }])
 
   const remaining = []
   detected.forEach(d => {
@@ -120,11 +198,13 @@ export function fixRange(text, detected, start, end, suggestion) {
   return { text: newText, detected: remaining }
 }
 
-// ── rewriteAll — applies every suggestion to exactly what is highlighted.
+// ── rewriteAll — applies every suggestion to exactly what is highlighted
+// (each capitalized for its position), then capitalizes every sentence start.
 // A finding without a suggestion is left as written, never deleted. ────────
 export function rewriteAll(text, detected) {
   const edits = biasRanges(text, detected)
     .filter(r => r.item.suggestion)
-    .map(r => ({ start: r.start, end: r.end, replacement: r.item.suggestion }))
-  return applyEdits(text, edits).text
+    .map(r => ({ start: r.start, end: r.end,
+                 replacement: matchCase(r.item.suggestion, text, r.start, text.slice(r.start, r.end)) }))
+  return capitalizeSentences(applyEdits(text, edits).text)
 }
