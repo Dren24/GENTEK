@@ -1,3 +1,6 @@
+// ── TermsPage — static Terms of Service page (/terms) ─────────────────────────
+// Linked from the footer, the sign-up modal, and Google's sign-in consent screen.
+
 import { Link } from 'react-router-dom'
 
 const SECTIONS = [

@@ -1,3 +1,9 @@
+// ── Vite config (frontend dev server + build) ─────────────────────────────────
+// In development (npm run dev) the React app runs on :5173 and these proxy
+// rules forward API calls to the FastAPI backend on :8000, so the frontend can
+// call '/analyze' and '/auth/...' with relative URLs. In production the
+// backend serves the built app itself, so the same URLs work unchanged.
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 

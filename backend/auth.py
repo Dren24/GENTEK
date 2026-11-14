@@ -1,7 +1,30 @@
 # ── Auth & history routes ────────────────────────────────────────────────────
-# All routes are prefixed with /auth (e.g. POST /auth/register).
-# Passwords are hashed with bcrypt — never stored or returned in plain text.
-# Protected routes require a valid JWT Bearer token (issued at login/register).
+# All routes are prefixed with /auth (e.g. POST /auth/register). Included into
+# the app by main.py (app.include_router(auth.router)); called from the
+# frontend by src/context/AuthContext.jsx and a few pages.
+#
+# Security basics:
+#   • Passwords are hashed with bcrypt — never stored or returned in plain text.
+#   • A successful login returns a JWT ("token"); protected routes read it from
+#     the "Authorization: Bearer <token>" header (get_current_user) and check
+#     the user can only touch their own data (current_user["id"] == user_id).
+#   • Emailed 6-digit codes (OTP) are stored only as SHA-256 hashes, expire in
+#     5 minutes, are single-use, and burn after 5 wrong tries. Rate limits per
+#     email and per IP slow down guessing and spam (_RateLimiter).
+#
+# Main flows (start reading at the route, then follow the helpers it calls):
+#   Sign up ........ POST /register → _code_flow → _issue_code → email
+#                    POST /verify-code (purpose "verify") → account verified + logged in
+#   Log in ......... POST /login → password OK → trusted browser? token
+#                    : new browser → emailed code → POST /verify-code ("login")
+#   Google ......... POST /google → token checked with Google → find/create user → token
+#   Forgot pw ...... POST /forgot-password → code → POST /verify-reset-code
+#                    → reset token → POST /reset-password → new password + logged in
+#   Create pw ...... POST /create-password (Google-only accounts)
+#   History ........ GET/POST/PUT/DELETE /history/... (saved analyses, sidebar)
+#   Account ........ PUT /update, /change-password, /notifications, /upgrade; DELETE /delete
+#   Contact form ... POST /contact → email to GENTEK's inbox
+#   Email sending .. _send_email → Brevo API (on Render) or Gmail SMTP (local)
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -696,23 +719,6 @@ def update_notifications(user_id: int, req: NotificationsRequest, db: Session = 
     user.email_notifications = 1 if req.email_notifications else 0
     db.commit()
     return {"email_notifications": bool(user.email_notifications)}
-
-
-# ── PUT /auth/upgrade/{user_id} — activate Premium ────────────────────────────
-# GENTEK's checkout (PaymentModal.jsx) is a UI-only demo — no real payment
-# gateway is wired up. This is what "Submit Payment" actually calls once the
-# user completes that flow, so the account is genuinely marked Premium instead
-# of just showing a success screen with no effect.
-@router.put("/upgrade/{user_id}")
-def upgrade_to_premium(user_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    if current_user["id"] != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user.is_premium = 1
-    db.commit()
-    return {"is_premium": bool(user.is_premium)}
 
 
 # ── DELETE /auth/delete/{user_id} — permanently remove account ───────────────

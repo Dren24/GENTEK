@@ -1,6 +1,8 @@
 // ── App entry point ──────────────────────────────────────────────────────────
 // Mounts the React app into #root with BrowserRouter, AuthProvider, and StrictMode.
 // AuthProvider must sit inside BrowserRouter so it can use useNavigate internally.
+// Order of the app: main.jsx → AuthProvider (session) → App.jsx (layout + routes)
+// → the page for the current URL (src/pages/*).
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

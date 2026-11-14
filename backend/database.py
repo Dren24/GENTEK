@@ -1,5 +1,5 @@
 # ── Database configuration ────────────────────────────────────────────────────
-# Uses PostgreSQL in production (DATABASE_URL env var set by Railway).
+# Uses PostgreSQL in production (Neon; DATABASE_URL is set in Render's settings).
 # Falls back to local SQLite for development when DATABASE_URL is not set.
 
 import os
@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./gentek.db").strip()
 
-# Railway provides postgres:// but SQLAlchemy requires postgresql://
+# Some hosts give postgres:// URLs, but SQLAlchemy requires postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 

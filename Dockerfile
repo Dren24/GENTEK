@@ -1,3 +1,10 @@
+# ── Docker build used by Render ────────────────────────────────────────────────
+# 1. Builds the React frontend (npm run build → dist/)
+# 2. Installs the Python backend and starts FastAPI (uvicorn), which serves
+#    both the API and the built frontend from one container.
+# Secrets (API keys, passwords) are NOT baked in — Render passes them as
+# environment variables at runtime.
+
 FROM python:3.11-slim
 
 # Install Node.js 20

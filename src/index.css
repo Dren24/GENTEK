@@ -1,3 +1,9 @@
+/* ── Global styles ──────────────────────────────────────────────────────────────
+   Tailwind layers + a few shared classes used across pages:
+   .bias-male / .bias-female  highlight colors for detected words
+   .reveal / .visible         scroll fade-in (see src/hooks/useScrollReveal.js)
+   .card, .btn-primary, ...   reusable component styles */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

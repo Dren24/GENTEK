@@ -1,7 +1,6 @@
 // ── AboutPage — full-page About GENTEK content ────────────────────────────────
 // Five sections: Hero, Mission & Vision cards, Product details + stats card,
 // Who It's For audience grid, and a bottom CTA strip.
-// Also shown inside HelpModal as a condensed version for logged-in users.
 
 import { Link } from 'react-router-dom'
 import { Target, Eye, ArrowRight, Lightbulb, Globe, Users } from '@phosphor-icons/react'

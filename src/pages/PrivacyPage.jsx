@@ -1,3 +1,7 @@
+// ── PrivacyPage — static Privacy Policy page (/privacy) ───────────────────────
+// Linked from the footer, the sign-up modal, and Google's sign-in consent
+// screen (Google requires a public privacy policy URL).
+
 import { Link } from 'react-router-dom'
 
 const SECTIONS = [

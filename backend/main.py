@@ -42,7 +42,7 @@ with engine.connect() as _conn:
             _conn.rollback()
 
 # ── Seed a DEV/TEST Premium account — local SQLite dev only, never touches a
-# real (Railway/Postgres) production database. Lets Premium behavior be tested
+# real (Neon/PostgreSQL) production database. Lets Premium behavior be tested
 # end-to-end without a real payment processor. Idempotent: only inserts if the
 # email doesn't already exist. Clearly named so it can't be mistaken for a
 # real paying customer.
@@ -93,7 +93,15 @@ def health():
 
 
 # ── POST /analyze — run gender bias detection on submitted text ───────────────
-# Returns detected patterns, score, classification, and highlighted HTML.
+# FULL FLOW of one analysis:
+#   User clicks "Analyze Text" (src/pages/HomePage.jsx → analyzeText)
+#   → fetch POST /analyze {text}  (token attached if logged in)
+#   → this function: checks the plan's word limit
+#   → analyzer.analyze(): lexicon + AI → findings, label, score
+#   → JSON response → HomePage normalizeApiResult() → highlights the words,
+#     shows Male/Female/Gender-Neutral %, and saves it to history (/auth/history).
+# Returns detected patterns, score, classification and AI status (no HTML —
+# the frontend builds the highlighting itself, see src/utils/biasHighlight.js).
 # Optionally authenticated: guests and Free accounts are capped at
 # FREE_WORD_LIMIT words server-side — the frontend's own truncation is only a
 # UX nicety, this is the actual enforcement, so it holds even if the client

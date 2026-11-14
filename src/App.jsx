@@ -1,10 +1,14 @@
 // ── Root app component ────────────────────────────────────────────────────────
 // Handles global layout: sidebar offset, shared Navbar/Footer, route definitions,
-// and the global PricingModal overlay. Pages with their own full-screen layout
-// (like /detector) bypass the shared shell entirely.
+// and the global PricingModal overlay. /reset-password uses its own full-screen
+// layout and bypasses the shared shell (HIDE_SHELL below).
+//
+// Layout: <AppSidebar> (logged-in users only) on the left, then the page area
+// with <Navbar> on top, the current route's page, and <Footer> (guests only).
 
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useIsMobile } from './hooks/useIsMobile'
+import { useScrollReveal } from './hooks/useScrollReveal'
 import { useEffect } from 'react'
 import Navbar        from './components/shared/Navbar'
 import Footer        from './components/shared/Footer'
@@ -38,26 +42,6 @@ function ScrollToTop() {
     }
   }, [pathname, hash])
   return null
-}
-
-// ── useScrollReveal — adds 'visible' to .reveal elements when they enter view ──
-// Re-runs on pathname OR user changes so newly rendered sections (e.g. guest
-// sections that appear after logout) are picked up by the observer.
-function useScrollReveal(user) {
-  const { pathname } = useLocation()
-  useEffect(() => {
-    const run = () => {
-      const observer = new IntersectionObserver(
-        (entries) => entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add('visible') }),
-        { threshold: 0.1, rootMargin: '0px 0px -30px 0px' }
-      )
-      document.querySelectorAll('.reveal').forEach((el) => observer.observe(el))
-      return observer
-    }
-    let obs
-    const timer = setTimeout(() => { obs = run() }, 100)
-    return () => { clearTimeout(timer); obs?.disconnect() }
-  }, [pathname, user])
 }
 
 // ── Pages that use their own full-screen layout (no shared navbar/footer/sidebar)

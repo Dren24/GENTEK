@@ -4,6 +4,17 @@
 // refresh — localStorage when "Remember me" is checked (survives closing the
 // browser), sessionStorage otherwise (cleared when the tab/browser closes).
 // History is loaded from the backend on login.
+//
+// This is the frontend's bridge to backend/auth.py: every login, sign-up,
+// emailed-code, password and history call goes through a function here, and
+// any component can use them with `const { user, login, ... } = useAuth()`.
+//   login / register      → POST /auth/login, /auth/register (may return
+//                           { pending } when an emailed code is needed)
+//   verifyCode            → POST /auth/verify-code → startSession()
+//   loginWithGoogle       → POST /auth/google
+//   resetPassword         → POST /auth/reset-password (signs the user in)
+//   addToHistory etc.     → /auth/history/...
+//   authFetch             → fetch with the token; logs out on 401 (expired token)
 
 import { createContext, useContext, useState, useEffect } from 'react'
 import { isMobileViewport } from '../hooks/useIsMobile'

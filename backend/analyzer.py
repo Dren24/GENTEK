@@ -1,9 +1,39 @@
+"""
+GENTEK bias analyzer — the core algorithm.
+
+Called by:  main.py → POST /analyze → analyze(text)
+Returns:    the detected biased words/phrases, Male/Female/Gender-Neutral
+            classification, bias score, and whether the AI was used.
+
+HOW IT WORKS (two layers that run on every analysis):
+
+  1. Rule-based lexicon  (_pattern_detect)
+     A fixed list of known biased words and phrases (BIAS_PATTERNS:
+     "chairman", "housewife", "men are better", Tagalog/Bisaya phrases, ...).
+     Fast, always available, never needs the internet. Coded words such as
+     "bossy" only count when a gendered word is nearby.
+
+  2. AI / LLM layer      (_llm_analyze)
+     The text is sent to a large language model with instructions
+     (_SYSTEM_PROMPT) to find bias the list can't catch: stereotypes, generic
+     "he", discrimination, implicit gender roles — in any writing style.
+     Models are tried in order (LLM_CHAIN): Llama 3.1 8B on Hugging Face,
+     then Groq's gpt-oss models as backup. Long text is split into chunks.
+     Every AI answer is checked (_validate_llm_items) so it can't invent
+     words that aren't in the text or flag ordinary pronouns.
+
+  Then: results are merged (_merge), scored by how many findings there are
+  (_score), and split into Male % / Female % / Gender-Neutral % shares
+  (bias_breakdown). If the AI is unavailable, the lexicon result is still
+  returned and ai_powered=False tells the frontend to say so.
+"""
+
 import re
 import os
 import json
 import time
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
@@ -942,6 +972,18 @@ def bias_breakdown(score: int, male: int, female: int) -> tuple:
 
 
 def analyze(text: str) -> dict:
+    """Analyze one text for gender bias — the function POST /analyze calls.
+
+    Input:  the user's text (already cut to the Free-plan word limit by main.py).
+    Output: dict with
+      detected     list of findings: {word, type ("male"/"female"), suggestion,
+                   reason, [category], [spans]} — highlighted by the frontend
+      label        "MALE-BIASED" | "FEMALE-BIASED" | "GENDER-NEUTRAL"
+      score        overall bias % (0 when nothing was found)
+      male_pct / female_pct / neutral_pct   shares of 100 shown as indicators
+      ai_powered / ai_partial / ai_error / ai_models   whether, how fully, and
+                   by which model the AI reviewed the text
+    """
     words = len(text.strip().split()) if text.strip() else 0
 
     # Step 1: always run pattern matching

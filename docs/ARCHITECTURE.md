@@ -1,3 +1,5 @@
+> **Outdated (2026-11):** parts of this document describe components that no longer exist (Hero, Analyzer, DetectorPage, WorkspacePage, …). For the current structure, flows and API, see [`EXHIBITION_CODE_GUIDE.md`](../EXHIBITION_CODE_GUIDE.md).
+
 # GENTEK AI System Architecture
 
 ## System Overview

@@ -4,12 +4,20 @@
 //             Pricing / FAQ / Contact CTA sections below.
 //   • Logged-in: shows just the editor (no headline, no sections below).
 // Editor expands to two-column when results are shown (input left, results right).
+//
+// Where to look:
+//   runAnalysis()        offline fallback analysis (keyword list in BIAS_PATTERNS)
+//   analyzeText()        Analyze button → POST /analyze → show results
+//   normalizeApiResult() backend reply → page state (highlights, %, label)
+//   applyFix()           click a suggestion → replace that word only
+//   rewriteText()        "Rewrite Text" → apply every suggestion at once
+//   Results panel JSX    search for "Analysis percentages"
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  ArrowRight, ArrowLeft, SpinnerGap, WarningCircle, Trash,
+  ArrowRight, SpinnerGap, WarningCircle, Trash,
   UploadSimple, FilePdf, FileDoc, FileTxt,
   Command, ArrowElbowDownLeft, Sparkle, ShieldCheck,
   Lightning, Users, ChartBar, Check, X, CaretDown, CaretUp,
@@ -521,8 +529,15 @@ export default function HomePage() {
     }
   }, [user, isTempSession, text, addToHistory, updateHistory])
 
-  // ── analyze — calls /analyze API, falls back to client runAnalysis on error ──
-  // ── analyzeText — core analysis logic, accepts text directly ────────────
+  // ── analyzeText — what happens when the user clicks "Analyze Text" ──────────
+  // 1. Guests get 2 free analyses; the 3rd opens the login popup.
+  // 2. POST /analyze with the text (+ login token) → backend/main.py
+  //    analyze_text → backend/analyzer.py analyze() (lexicon + AI).
+  // 3. normalizeApiResult() turns the reply into what the page shows:
+  //    highlighted words, Male/Female/Gender-Neutral %, AI badge.
+  // 4. saveToHistory() stores it for logged-in users (sidebar "Recent").
+  // If the server can't be reached, runAnalysis() (keyword list built into
+  // this file) is used instead, and the result is marked "Keyword check only".
   const analyzeText = useCallback(async (inputText) => {
     if (!inputText.trim()) return
 
