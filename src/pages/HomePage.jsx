@@ -13,7 +13,7 @@
 //   rewriteText()        "Rewrite Text" → apply every suggestion at once
 //   Results panel JSX    search for "Analysis percentages"
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import {
@@ -31,7 +31,7 @@ import { BrainIcon, GentekMark } from '../components/shared/GentekLogo'
 import { useAuth } from '../context/AuthContext'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import AuthModal from '../components/shared/AuthModal'
-import { escapeRx, escapeHtml, highlightHtml, fixOne, rewriteAll } from '../utils/biasHighlight'
+import { escapeRx, escapeHtml, highlightHtml, fixRange, rewriteAll } from '../utils/biasHighlight'
 import { biasBreakdown } from '../utils/biasScore'
 
 // ── FREE_WORD_LIMIT — max words a Free (non-premium) logged-in user can have
@@ -199,14 +199,81 @@ const PLAN_FEATURES = [
   { label: 'Priority processing', free: false,   pro: true        },
 ]
 
-// ── WordPopup — floating card shown when a highlighted word/phrase is clicked ──
-// Closes on outside click. Positioned near the clicked mark via fixed coords.
-function WordPopup({ word, suggestion, reason, type, x, y, onApply, onClose }) {
+// ── WordPopup — suggestion card for one clicked highlight ──────────────────────
+// Anchored to the exact <mark> that was clicked (found by its data-start inside
+// the results editor, containerRef). Its position is recomputed whenever the
+// editor or page scrolls or the window/keyboard resizes, so it stays attached
+// to the phrase:
+//   • below the phrase, or above it when there isn't room below,
+//   • horizontally inside the editor (and the screen), never under the top bar,
+//   • closed automatically once the phrase scrolls out of the editor's view.
+// Closes on a click/tap outside, Escape, or after a suggestion is applied.
+const POPUP_GAP = 8
+function WordPopup({ start, word, suggestion, reason, type, containerRef, onApply, onClose }) {
   const ref = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  useLayoutEffect(() => {
+    let frame = 0
+    const place = () => {
+      frame = 0
+      const container = containerRef.current
+      const mark = container?.querySelector(`mark[data-start="${start}"]`)
+      const popup = ref.current
+      if (!container || !mark || !popup) { onClose(); return }
+      const m = mark.getBoundingClientRect()
+      const c = container.getBoundingClientRect()
+      const vv = window.visualViewport
+      const viewW = vv ? vv.width : window.innerWidth
+      const viewH = vv ? vv.height : window.innerHeight
+      const offTop = vv ? vv.offsetTop : 0
+      // The fixed top bar (Navbar <header>) must never be covered
+      const navBottom = Math.max(offTop, document.querySelector('header')?.getBoundingClientRect().bottom ?? 0)
+      // Phrase scrolled out of the editor (or off screen) → nothing to point at
+      const visible = m.bottom > c.top && m.top < c.bottom && m.bottom > navBottom && m.top < offTop + viewH
+      if (!visible) { onClose(); return }
+
+      const minX = Math.max(c.left, 0) + POPUP_GAP
+      const maxX = Math.min(c.right, viewW) - POPUP_GAP
+      const width = Math.min(256, maxX - minX)
+      const left = Math.min(Math.max(m.left + m.width / 2 - width / 2, minX), maxX - width)
+      const h = popup.offsetHeight
+      const spaceBelow = offTop + viewH - m.bottom - POPUP_GAP
+      const spaceAbove = m.top - navBottom - POPUP_GAP
+      const below = spaceBelow >= h || spaceBelow >= spaceAbove
+      let top = below ? m.bottom + POPUP_GAP : m.top - POPUP_GAP - h
+      top = Math.min(Math.max(top, navBottom + POPUP_GAP), offTop + viewH - h - POPUP_GAP)
+      setPos({ left, top, width, placement: below ? 'below' : 'above' })
+    }
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(place) }
+    place()
+    // Capture phase catches scrolling of the editor box as well as the page
+    window.addEventListener('scroll', schedule, true)
+    window.addEventListener('resize', schedule)
+    window.visualViewport?.addEventListener('resize', schedule)
+    window.visualViewport?.addEventListener('scroll', schedule)
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', schedule, true)
+      window.removeEventListener('resize', schedule)
+      window.visualViewport?.removeEventListener('resize', schedule)
+      window.visualViewport?.removeEventListener('scroll', schedule)
+    }
+  }, [start, containerRef, onClose])
+
+  // Outside click/tap, or Escape, dismisses it. A tap on another highlight
+  // also lands here first; the editor's click handler then opens that one.
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
+    const outside = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    const esc = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside, { passive: true })
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+      document.removeEventListener('keydown', esc)
+    }
   }, [onClose])
 
   const typeLabel = type === 'female' ? 'Female-biased' : 'Male-biased'
@@ -215,27 +282,31 @@ function WordPopup({ word, suggestion, reason, type, x, y, onApply, onClose }) {
   return (
     <div
       ref={ref}
-      className="fixed z-50 w-64 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card-hover p-4"
-      style={{ left: x, top: y, transform: 'translate(-50%, 0)' }}
+      role="dialog"
+      aria-label={`${typeLabel}: ${word}`}
+      data-placement={pos?.placement}
+      className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card-hover p-4"
+      // Rendered hidden at first so its height can be measured before placing
+      style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { left: 0, top: 0, width: 256, visibility: 'hidden' }}
     >
       {/* Header — bias type label + close */}
       <div className="flex items-center justify-between gap-2 mb-2">
         <span className={`text-[10px] font-bold uppercase tracking-widest ${typeColor}`}>{typeLabel}</span>
-        <button onClick={onClose} className="text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 transition-colors">
+        <button onClick={onClose} aria-label="Close suggestion" className="-m-1.5 p-1.5 text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-300 transition-colors">
           <X size={12} weight="bold" />
         </button>
       </div>
       {/* Detected term + reason */}
-      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">{word}</p>
+      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1 break-words">{word}</p>
       <p className="text-xs text-gray-400 dark:text-gray-500 leading-relaxed mb-3">{reason}</p>
-      {/* Suggested alternative — click the word itself to apply it. Some AI
-          findings come without one; then there's nothing to apply. */}
+      {/* Suggested alternative — click it to replace THIS occurrence only. Some
+          AI findings come without one; then there's nothing to apply. */}
       {suggestion && (
         <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
           <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Suggested</p>
           <button
-            onClick={() => { onApply(word, suggestion); onClose() }}
-            className="block w-full text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline text-left whitespace-normal break-words"
+            onClick={() => { onClose(); onApply(suggestion) }}
+            className="block w-full min-h-[44px] sm:min-h-0 -mx-1 px-1 py-1 rounded-lg text-sm font-semibold text-brand-700 dark:text-brand-300 hover:text-brand-600 dark:hover:text-brand-200 hover:underline text-left whitespace-normal break-words"
           >
             {suggestion}
           </button>
@@ -266,6 +337,7 @@ export default function HomePage() {
   // status next to the still-editable text until the text changes.
   const [cleanResult, setCleanResult] = useState(null)
   const textareaRef              = useRef(null)
+  const resultsRef               = useRef(null)        // highlighted-results box — the word popup anchors to marks inside it
   const overlayRef               = useRef(null)        // mirrors textarea scroll for the Free-limit fade overlay
   const fileInputRef             = useRef(null)
   const analyzeRef               = useRef(null)        // always points to latest analyze fn (avoids stale closure)
@@ -627,14 +699,14 @@ export default function HomePage() {
   // ── Keyboard shortcut — Cmd/Ctrl+Enter triggers analysis ─────────────────
   const handleKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); analyze() } }
 
-  // ── applyFix — replaces one detected word/phrase with its suggestion,
-  // entirely on the client: no re-analysis, no API/LLM call. Only the
-  // occurrences highlighted for that term are replaced (for AI-flagged generic
-  // pronouns, just those spans — not every "he" in the text); its entry is
-  // dropped from `detected` and the score/highlighting recomputed locally. ──
-  const applyFix = (word, suggestion) => {
+  // ── applyFix — replaces the ONE highlighted occurrence the user clicked
+  // ([start, end) in the text, from the mark's data-start/data-end) with the
+  // chosen suggestion, entirely on the client: no re-analysis, no API call.
+  // Other copies of the same word stay highlighted; the rest of the text,
+  // spacing and paragraphs are untouched; score/highlighting are recomputed. ──
+  const applyFix = (start, end, suggestion) => {
     if (!results) return
-    const { text: newText, detected: updatedDetected } = fixOne(text, results.detected, word, suggestion)
+    const { text: newText, detected: updatedDetected } = fixRange(text, results.detected, start, end, suggestion)
     const male   = updatedDetected.filter(d => d.type === 'male').length
     const female = updatedDetected.filter(d => d.type === 'female').length
     const { label, score } = localScore(updatedDetected)
@@ -671,19 +743,18 @@ export default function HomePage() {
 
   // ── handleMarkClick — event delegation: reads data-* off the clicked <mark> ──
   const handleMarkClick = (e) => {
-    const mark = e.target.closest('mark[data-word]')
-    if (!mark) return
-    const rect = mark.getBoundingClientRect()
-    const clampedX = Math.min(Math.max(rect.left + rect.width / 2, 140), window.innerWidth - 140)
+    const mark = e.target.closest('mark[data-start]')
+    if (!mark) { setWordPopup(null); return }   // clicked plain text → dismiss
     setWordPopup({
+      start: Number(mark.dataset.start),
+      end: Number(mark.dataset.end),
       word: mark.dataset.word,
       suggestion: mark.dataset.suggestion,
       reason: mark.dataset.reason,
       type: mark.dataset.type,
-      x: clampedX,
-      y: rect.bottom + 8,
     })
   }
+  const closeWordPopup = useCallback(() => setWordPopup(null), [])
 
   return (
     <>
@@ -817,6 +888,7 @@ export default function HomePage() {
                   locked out of analysis, in both states, without losing a word. ── */}
               {results ? (
                 <div
+                  ref={resultsRef}
                   onClick={handleMarkClick}
                   className="w-full px-6 py-5 text-[15px] text-gray-800 dark:text-gray-100 leading-relaxed whitespace-pre-wrap editor-scroll cursor-default"
                   style={{ minHeight: '15rem', maxHeight: '26rem', overflowY: 'auto' }}
@@ -1302,7 +1374,13 @@ export default function HomePage() {
         Portaled to <body> so it isn't clipped/mispositioned by any
         transformed ancestor, which would break position:fixed. ─────────── */}
     {wordPopup && createPortal(
-      <WordPopup {...wordPopup} onApply={applyFix} onClose={() => setWordPopup(null)} />,
+      <WordPopup
+        key={wordPopup.start}
+        {...wordPopup}
+        containerRef={resultsRef}
+        onApply={(suggestion) => applyFix(wordPopup.start, wordPopup.end, suggestion)}
+        onClose={closeWordPopup}
+      />,
       document.body
     )}
 </>

@@ -57,8 +57,11 @@ export function biasRanges(text, detected) {
 }
 
 // ── highlightHtml — HTML-escapes user text and wraps each flagged range in a
-// <mark> carrying the popup's data-* attributes. Escaping every segment
-// prevents XSS when the result is injected via dangerouslySetInnerHTML. ──────
+// <mark> carrying the popup's data-* attributes. data-start/data-end are the
+// range's position in the plain text: they identify exactly which occurrence
+// was clicked, so the popup can anchor to it and fixRange() can replace only
+// it. Escaping every segment prevents XSS when the result is injected via
+// dangerouslySetInnerHTML. ─────────────────────────────────────────────────────
 export function highlightHtml(text, detected) {
   let html = ''
   let pos = 0
@@ -66,7 +69,7 @@ export function highlightHtml(text, detected) {
     const { word, type, suggestion, reason } = item
     const cls = type === 'male' ? 'bias-male' : 'bias-female'
     html += escapeHtml(text.slice(pos, start)) +
-      `<mark class="${cls}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${escapeHtml(text.slice(start, end))}</mark>`
+      `<mark class="${cls}" data-start="${start}" data-end="${end}" data-word="${escapeAttr(word)}" data-suggestion="${escapeAttr(suggestion)}" data-reason="${escapeAttr(reason)}" data-type="${escapeAttr(type)}">${escapeHtml(text.slice(start, end))}</mark>`
     pos = end
   }
   return html + escapeHtml(text.slice(pos))
@@ -95,22 +98,24 @@ function applyEdits(text, edits) {
   return { text: out, mapSpan }
 }
 
-// ── fixOne — applies one word's suggestion to exactly the ranges highlighted
-// for it, and returns the new text plus the remaining detections (spans
-// shifted to match; a detection whose every span was overwritten is dropped). ─
-export function fixOne(text, detected, word, suggestion) {
-  const key = word.toLowerCase()
-  const edits = biasRanges(text, detected)
-    .filter(r => r.item.word.toLowerCase() === key)
-    .map(r => ({ start: r.start, end: r.end, replacement: suggestion }))
-  const { text: newText, mapSpan } = applyEdits(text, edits)
+// ── fixRange — replaces ONE highlighted occurrence (the one the user clicked,
+// identified by its [start, end) range) with a suggestion. Everything else in
+// the text is untouched. Returns the new text plus the detections that still
+// apply: span-based items get their spans shifted (the replaced span is
+// dropped); word-based items stay only if their word still occurs somewhere,
+// so other copies of the same word remain highlighted. ─────────────────────────
+export function fixRange(text, detected, start, end, suggestion) {
+  if (!(start >= 0 && end <= text.length && start < end)) return { text, detected }
+  const { text: newText, mapSpan } = applyEdits(text, [{ start, end, replacement: suggestion }])
 
   const remaining = []
   detected.forEach(d => {
-    if (d.word.toLowerCase() === key) return
-    if (!itemSpans(text, d)) { remaining.push(d); return }
-    const spans = d.spans.map(mapSpan).filter(Boolean)
-    if (spans.length) remaining.push({ ...d, spans })
+    if (itemSpans(text, d)) {
+      const spans = d.spans.map(mapSpan).filter(Boolean)
+      if (spans.length) remaining.push({ ...d, spans })
+    } else if (biasRanges(newText, [d]).length) {
+      remaining.push(d)
+    }
   })
   return { text: newText, detected: remaining }
 }
