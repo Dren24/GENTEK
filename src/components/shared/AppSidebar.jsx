@@ -26,6 +26,13 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 //     (which shrinks window.visualViewport) never hides its input or results,
 //   • on phones, sits over a dimmed backdrop, so it reads as a separate layer
 //     instead of half-covering the text box; tapping the backdrop closes it.
+// ── Floating-popup theme — same look as the Navbar profile dropdown: white +
+// soft shadow in Light Mode, GENTEK dark navy in Dark Mode. Every sidebar
+// flyout (Search, Pinned, Recents, profile menu) uses these, so they follow
+// the `dark` class on <html> and update the moment the theme is switched.
+const POPUP_PANEL = 'bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 shadow-card-hover dark:shadow-2xl dark:shadow-black/50'
+const POPUP_HOVER = 'hover:bg-brand-50 dark:hover:bg-gray-800'
+
 // Closes on a click/tap outside, but not on its own icon (the icon toggles).
 const GUTTER = 8
 function CollapsedPopup({ anchorRef, onClose, children, className = '', width = 288 }) {
@@ -82,11 +89,11 @@ function CollapsedPopup({ anchorRef, onClose, children, className = '', width = 
   if (!pos) return null
   return createPortal(
     <>
-      {isMobile && <div className="fixed inset-0 z-[55] bg-black/30" aria-hidden="true" />}
+      {isMobile && <div className="fixed inset-0 z-[55] bg-gray-900/20 dark:bg-black/40" aria-hidden="true" />}
       <div
         ref={ref}
         role="dialog"
-        className={`fixed z-[60] flex flex-col bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden ${className}`}
+        className={`fixed z-[60] flex flex-col ${POPUP_PANEL} rounded-2xl overflow-hidden ${className}`}
         style={{ left: pos.left, top: pos.top, width: pos.width, maxHeight: pos.maxHeight, animation: 'fadeIn 0.15s ease' }}
       >
         {children}
@@ -107,18 +114,18 @@ function SearchPopup({ anchorRef, items, onClose, onNew, onSelect }) {
   return (
     <CollapsedPopup anchorRef={anchorRef} onClose={onClose} width={288}>
       {/* Search input row with clear X */}
-      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-gray-700">
-        <MagnifyingGlass size={14} className="text-gray-400 flex-shrink-0" />
+      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+        <MagnifyingGlass size={14} className="text-brand-600 dark:text-brand-400 flex-shrink-0" />
         <input
           autoFocus
           value={q}
           onChange={e => setQ(e.target.value)}
           placeholder="Search analyses..."
           aria-label="Search analyses"
-          className="flex-1 min-w-0 bg-transparent text-base sm:text-sm text-white placeholder-gray-500 outline-none"
+          className="flex-1 min-w-0 bg-transparent text-base sm:text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none"
         />
         {/* Close search popup button */}
-        <button onClick={onClose} aria-label="Close search" className="text-gray-500 hover:text-gray-300 transition-colors p-1">
+        <button onClick={onClose} aria-label="Close search" className="text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors p-1.5">
           <X size={13} weight="bold" />
         </button>
       </div>
@@ -126,9 +133,9 @@ function SearchPopup({ anchorRef, items, onClose, onNew, onSelect }) {
       {/* New Analysis shortcut button at top of results */}
       <button
         onClick={() => { onNew(); onClose() }}
-        className="flex-shrink-0 w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors border-b border-gray-700"
+        className={`flex-shrink-0 w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 ${POPUP_HOVER} transition-colors border-b border-gray-100 dark:border-gray-800`}
       >
-        <PencilSimple size={14} className="text-gray-400" />
+        <PencilSimple size={14} className="text-brand-600 dark:text-brand-400" />
         New Analysis
       </button>
 
@@ -136,7 +143,7 @@ function SearchPopup({ anchorRef, items, onClose, onNew, onSelect }) {
           fills the remaining height (capped above the keyboard), then scrolls */}
       <div className="flex-1 min-h-0 max-h-72 overflow-y-auto py-1">
         {filtered.length === 0 ? (
-          <p className="text-xs text-gray-500 px-4 py-3">{items.length === 0 ? 'No analyses yet.' : 'No results found.'}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 px-4 py-3">{items.length === 0 ? 'No analyses yet.' : 'No results found.'}</p>
         ) : (
           groups.map(g => {
             const groupItems = filtered.filter(r => r.group === g)
@@ -144,17 +151,17 @@ function SearchPopup({ anchorRef, items, onClose, onNew, onSelect }) {
             return (
               <div key={g}>
                 {/* Group label — e.g. "TODAY" */}
-                <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold text-gray-500 uppercase tracking-wider">{g}</p>
+                <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{g}</p>
                 {groupItems.map(r => (
                   <button
                     key={r.id}
                     onClick={() => { onSelect(r); onClose() }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-700 transition-colors"
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-left ${POPUP_HOVER} transition-colors`}
                   >
                     {/* Color dot indicates bias level */}
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.dot}`} />
-                    <span className="text-sm text-gray-200 truncate flex-1">{r.label}</span>
-                    <span className="text-[10px] text-gray-500 flex-shrink-0">{r.score}%</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-200 truncate flex-1">{r.label}</span>
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">{r.score}%</span>
                   </button>
                 ))}
               </div>
@@ -171,16 +178,16 @@ function PinnedPopup({ anchorRef, pinnedItems, onClose, onSelect }) {
   return (
     <CollapsedPopup anchorRef={anchorRef} onClose={onClose} width={240}>
       <div className="p-3 overflow-y-auto">
-        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Pinned</p>
+        <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-1">Pinned</p>
         {pinnedItems.length === 0 ? (
-          <p className="text-xs text-gray-500 px-1 py-2">No pinned analyses yet.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 px-1 py-2">No pinned analyses yet.</p>
         ) : (
           <div className="space-y-0.5">
             {pinnedItems.map(r => (
-              <button key={r.id} onClick={() => { onSelect(r); onClose() }} className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left hover:bg-gray-700 transition-colors">
+              <button key={r.id} onClick={() => { onSelect(r); onClose() }} className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left ${POPUP_HOVER} transition-colors`}>
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.dot}`} />
-                <span className="text-sm text-gray-200 truncate flex-1">{r.label}</span>
-                <span className="text-[10px] text-gray-500">{r.score}%</span>
+                <span className="text-sm text-gray-700 dark:text-gray-200 truncate flex-1">{r.label}</span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">{r.score}%</span>
               </button>
             ))}
           </div>
@@ -195,16 +202,16 @@ function RecentPopup({ anchorRef, items, onClose, onSelect }) {
   return (
     <CollapsedPopup anchorRef={anchorRef} onClose={onClose} width={256}>
       <div className="p-3 overflow-y-auto">
-        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Recents</p>
+        <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-1">Recents</p>
         {items.length === 0 ? (
-          <p className="text-xs text-gray-500 px-1 py-2">No analyses yet. Run one to see history.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 px-1 py-2">No analyses yet. Run one to see history.</p>
         ) : (
           <div className="space-y-0.5">
             {items.map(r => (
-              <button key={r.id} onClick={() => { onSelect(r); onClose() }} className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left hover:bg-gray-700 transition-colors">
+              <button key={r.id} onClick={() => { onSelect(r); onClose() }} className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left ${POPUP_HOVER} transition-colors`}>
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.dot}`} />
-                <span className="text-sm text-gray-200 truncate flex-1">{r.label}</span>
-                <span className="text-[10px] text-gray-500 flex-shrink-0">{r.score}%</span>
+                <span className="text-sm text-gray-700 dark:text-gray-200 truncate flex-1">{r.label}</span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">{r.score}%</span>
               </button>
             ))}
           </div>
@@ -226,44 +233,44 @@ function UserPopup({ user, logout, onClose, onNavigate, onHelp }) {
   return (
     <div
       ref={ref}
-      className="absolute left-full bottom-0 ml-2 z-50 w-52 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden"
+      className={`absolute left-full bottom-0 ml-2 z-50 w-52 ${POPUP_PANEL} rounded-2xl overflow-hidden`}
       style={{ animation: 'fadeIn 0.15s ease' }}
     >
       {/* User name + email header */}
-      <div className="px-4 py-3 border-b border-gray-700">
+      <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
         <div className="flex items-center gap-2.5">
           {/* Avatar circle with first letter of name */}
           <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center flex-shrink-0">
             <span className="text-xs font-bold text-white">{user?.name?.charAt(0).toUpperCase()}</span>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-white truncate flex items-center gap-1.5">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate flex items-center gap-1.5">
               <span className="truncate">{user?.name}</span>
               {user?.is_premium && (
-                <span className="flex-shrink-0 text-[9px] font-bold text-brand-300 bg-brand-900/50 border border-brand-700 px-1.5 py-0.5 rounded-full">PRO</span>
+                <span className="flex-shrink-0 text-[9px] font-bold text-brand-700 bg-brand-50 border-brand-200 dark:text-brand-300 dark:bg-brand-900/50 border dark:border-brand-700 px-1.5 py-0.5 rounded-full">PRO</span>
               )}
             </p>
-            <p className="text-[11px] text-gray-400 truncate">{user?.email}</p>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{user?.email}</p>
           </div>
         </div>
       </div>
       <div className="p-1.5">
         {/* Dashboard — navigate to /dashboard */}
-        <button onClick={() => { onNavigate('/dashboard'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
+        <button onClick={() => { onNavigate('/dashboard'); onClose() }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-700 dark:text-gray-300 ${POPUP_HOVER} transition-colors`}>
           <ChartBar size={14} />Dashboard
         </button>
         {/* Settings — navigate to /settings */}
-        <button onClick={() => { onNavigate('/settings'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
+        <button onClick={() => { onNavigate('/settings'); onClose() }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-700 dark:text-gray-300 ${POPUP_HOVER} transition-colors`}>
           <Gear size={14} />Settings
         </button>
         {/* About — navigate to /about */}
-        <button onClick={() => { onNavigate('/about'); onClose() }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-300 hover:bg-gray-700 transition-colors">
+        <button onClick={() => { onNavigate('/about'); onClose() }} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-gray-700 dark:text-gray-300 ${POPUP_HOVER} transition-colors`}>
           <Question size={14} />About
         </button>
         {/* Sign out — red destructive action */}
         <button
           onClick={() => { logout(); onNavigate('/') }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-rose-400 hover:bg-rose-900/30 transition-colors"
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"
         >
           <SignOut size={14} />Sign out
         </button>
