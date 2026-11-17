@@ -9,6 +9,7 @@
 //   runAnalysis()        offline fallback analysis (keyword list in BIAS_PATTERNS)
 //   analyzeText()        Analyze button → POST /analyze → show results
 //   normalizeApiResult() backend reply → page state (highlights, %, label)
+//   parseFile()          Upload / drag-and-drop → utils/documentText.js → editor
 //   applyFix()           click a suggestion → replace that word only
 //   rewriteText()        "Rewrite Text" → apply every suggestion at once
 //   startEditing() / saveEdits() / cancelEditing()
@@ -24,18 +25,15 @@ import {
   UploadSimple, FilePdf, FileDoc, FileTxt,
   Command, ArrowElbowDownLeft, Sparkle, ShieldCheck,
   Lightning, Users, ChartBar, Check, X, CaretDown, CaretUp,
-  PencilSimple, CheckCircle, FloppyDisk, NotePencil,
+  PencilSimple, CheckCircle, FloppyDisk, NotePencil, FileText,
 } from '@phosphor-icons/react'
-import * as pdfjsLib from 'pdfjs-dist'
-import mammoth from 'mammoth'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 import { BrainIcon, GentekMark } from '../components/shared/GentekLogo'
 import { useAuth } from '../context/AuthContext'
 import ConfirmModal from '../components/shared/ConfirmModal'
 import AuthModal from '../components/shared/AuthModal'
 import { escapeRx, escapeHtml, highlightHtml, fixRange, rewriteAll } from '../utils/biasHighlight'
 import { biasBreakdown } from '../utils/biasScore'
+import { extractText, ACCEPT, UploadError } from '../utils/documentText'
 
 // ── FREE_WORD_LIMIT — max words a Free (non-premium) logged-in user can have
 // analyzed in one go. Configurable without a code change via VITE_FREE_WORD_LIMIT;
@@ -357,7 +355,12 @@ export default function HomePage() {
   const guestAnalysisCountRef    = useRef(0)           // tracks how many analyses a guest has run
   const dragCounterRef           = useRef(0)           // tracks nested dragenter/dragleave to avoid flicker
   const [isDragging, setIsDragging] = useState(false)
-  const [fileAccept, setFileAccept] = useState('*')
+  // ── File upload state — progress text while reading, a readable error, and
+  // the loaded file ({ name, words, text, truncated }) for the file chip.
+  const [uploading, setUploading]       = useState(null)
+  const [uploadError, setUploadError]   = useState(null)
+  const [uploadedFile, setUploadedFile] = useState(null)
+  const uploadSeqRef             = useRef(0)           // ignores a slow file if another was picked since
   const currentHistoryIdRef      = useRef(null)       // id of currently-loaded history item
   const textStackRef             = useRef([])          // undo/redo text snapshots
   const stackIdxRef              = useRef(-1)          // current position in stack
@@ -406,43 +409,49 @@ export default function HomePage() {
   }, [])
 
   // ── parseFile — extracts text from a dropped or selected file ───────────────
+  // Extraction happens in the browser (utils/documentText.js); only the
+  // resulting text goes into the editor and, on Analyze, to /analyze.
   const parseFile = async (file) => {
     if (!file) return
-    const ext = file.name.split('.').pop().toLowerCase()
+    const seq = ++uploadSeqRef.current
+    setUploadError(null)
+    setUploadedFile(null)
+    setUploading('Reading file…')
     try {
-      let extracted = ''
-      if (ext === 'txt') {
-        extracted = await file.text()
-      } else if (ext === 'pdf') {
-        const data  = await file.arrayBuffer()
-        const pdf   = await pdfjsLib.getDocument({ data }).promise
-        const pages = []
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page    = await pdf.getPage(i)
-          const content = await page.getTextContent()
-          pages.push(content.items.map(it => it.str).join(' '))
-        }
-        extracted = pages.join('\n\n').trim()
-      } else if (ext === 'docx') {
-        const data   = await file.arrayBuffer()
-        const result = await mammoth.extractRawText({ arrayBuffer: data })
-        extracted    = result.value.trim()
-      }
-      if (extracted) {
-        setText(extracted)
-        setResults(null)
-        pushTextStack(extracted)
-        setTimeout(() => textareaRef.current?.focus(), 50)
-      }
+      const { text: extracted } = await extractText(file, msg => { if (seq === uploadSeqRef.current) setUploading(msg) })
+      if (seq !== uploadSeqRef.current) return
+      // Guests keep their hard word limit, same as typing/pasting
+      const kept = limitGuestWords(extracted)
+      const words = kept.trim().split(/\s+/).length
+      setText(kept)
+      setResults(null)
+      setCleanResult(null)
+      setEditNotice(null)
+      currentHistoryIdRef.current = null      // a new document = a new analysis
+      pushTextStack(kept)
+      setUploadedFile({ name: file.name || 'Document', words, text: kept, truncated: kept !== extracted })
     } catch (err) {
-      console.error('File parse error:', err)
+      if (seq !== uploadSeqRef.current) return
+      setUploadError(err instanceof UploadError ? err.message : 'Something went wrong reading this file. Please try again.')
+    } finally {
+      if (seq === uploadSeqRef.current) setUploading(null)
     }
   }
 
-  // ── openFilePicker — triggers hidden file input with the given MIME accept ──
+  // ── removeUploadedFile — drops the loaded document so another can be chosen
+  const removeUploadedFile = () => {
+    if (uploadedFile && text === uploadedFile.text) clear()
+    setUploadedFile(null)
+  }
+
+  // ── openFilePicker — sets the accepted types on the hidden input and opens
+  // it in the SAME tap (no setTimeout/state round-trip): iPhone Safari blocks
+  // a file picker that isn't opened directly inside the user's tap. ──
   const openFilePicker = (accept) => {
-    setFileAccept(accept)
-    setTimeout(() => fileInputRef.current?.click(), 10)
+    const input = fileInputRef.current
+    if (!input) return
+    input.accept = accept
+    input.click()
   }
 
   // ── Drag-and-drop handlers — counter avoids false "leave" on child elements ──
@@ -912,17 +921,26 @@ export default function HomePage() {
                 <div className="flex items-center gap-1">
                   {/* Upload dropdown — logged-in users only */}
                   {user && <div className="relative group">
-                    <button className="flex items-center gap-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
-                      <UploadSimple size={13} weight="bold" />Upload
+                    {/* Tap/click → file picker for PDF, Word and TXT at once (works
+                        on phones, which have no hover). Mouse users also get the
+                        per-type menu on hover. */}
+                    <button
+                      type="button"
+                      onClick={() => openFilePicker(ACCEPT.all)}
+                      disabled={!!uploading}
+                      aria-label="Upload a PDF, Word (.docx) or TXT file"
+                      className="flex items-center gap-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 min-h-[36px] rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 disabled:opacity-50 transition-colors"
+                    >
+                      {uploading ? <SpinnerGap size={13} className="animate-spin" /> : <UploadSimple size={13} weight="bold" />}Upload
                     </button>
                     {/* Hover dropdown — file type options */}
-                    <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
+                    <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card py-2 opacity-0 invisible [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:visible transition-all z-20">
                       {[
-                        { icon: FilePdf, label: 'Upload PDF',         accept: '.pdf'  },
-                        { icon: FileDoc, label: 'Upload Word (.docx)', accept: '.docx' },
-                        { icon: FileTxt, label: 'Upload TXT',          accept: '.txt'  },
+                        { icon: FilePdf, label: 'Upload PDF',         accept: ACCEPT.pdf  },
+                        { icon: FileDoc, label: 'Upload Word (.docx)', accept: ACCEPT.docx },
+                        { icon: FileTxt, label: 'Upload TXT',          accept: ACCEPT.txt  },
                       ].map(({ icon: Icon, label, accept }) => (
-                        <button key={label} onClick={() => openFilePicker(accept)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">
+                        <button key={label} type="button" onClick={() => openFilePicker(accept)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">
                           <Icon size={14} weight="duotone" />{label}
                         </button>
                       ))}
@@ -1032,6 +1050,35 @@ export default function HomePage() {
                   rows={10}
                   className="w-full px-6 py-5 text-[15px] text-gray-800 dark:text-gray-100 leading-relaxed resize-none outline-none bg-transparent placeholder-gray-300 dark:placeholder-gray-600 editor-scroll"
                 />
+              )}
+
+              {/* ── Upload status — reading progress, a clear error, or the loaded
+                  file with its extracted word count and a Remove button ── */}
+              {uploading && (
+                <div role="status" className="mx-5 mb-3 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2">
+                  <SpinnerGap size={14} className="animate-spin flex-shrink-0" />{uploading}
+                </div>
+              )}
+              {uploadError && !uploading && (
+                <div role="alert" className="mx-5 mb-3 flex items-start gap-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2">
+                  <WarningCircle size={14} weight="fill" className="flex-shrink-0 mt-px" />
+                  <span className="flex-1">{uploadError}</span>
+                  <button type="button" onClick={() => setUploadError(null)} aria-label="Dismiss" className="-m-1 p-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/40"><X size={12} weight="bold" /></button>
+                </div>
+              )}
+              {uploadedFile && !uploading && !results && text === uploadedFile.text && (
+                <div className="mx-5 mb-3 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-xl pl-3 pr-1 py-1">
+                  <FileText size={14} weight="duotone" className="flex-shrink-0 text-brand-600 dark:text-brand-400" />
+                  {/* Long filenames shorten with "…"; the word count always stays visible */}
+                  <span className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5">
+                    <strong className="font-semibold text-gray-800 dark:text-gray-100 truncate max-w-full">{uploadedFile.name}</strong>
+                    <span className="whitespace-nowrap">{uploadedFile.words.toLocaleString()} words extracted</span>
+                    {uploadedFile.truncated && <span className="whitespace-nowrap text-amber-600 dark:text-amber-400">(guest limit: first {GUEST_WORD_LIMIT} kept)</span>}
+                  </span>
+                  <button type="button" onClick={removeUploadedFile} className="flex-shrink-0 inline-flex items-center gap-1 font-semibold text-gray-500 hover:text-rose-500 px-2.5 min-h-[36px] rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20">
+                    <X size={12} weight="bold" />Remove
+                  </button>
+                </div>
               )}
 
               {/* ── Hint after Rewrite Text / Save Changes — the text is editable
@@ -1475,12 +1522,16 @@ export default function HomePage() {
 
     </div>
 
-    {/* ── Hidden file input — triggered by Upload dropdown or drag-and-drop ── */}
+    {/* ── Hidden file input — opened by the Upload button / menu (openFilePicker).
+        sr-only rather than display:none: some mobile browsers won't open a
+        picker for a display:none input. ── */}
     <input
       ref={fileInputRef}
       type="file"
-      accept={fileAccept}
-      className="hidden"
+      accept={ACCEPT.all}
+      tabIndex={-1}
+      aria-hidden="true"
+      className="sr-only"
       onChange={e => { if (e.target.files?.[0]) parseFile(e.target.files[0]); e.target.value = '' }}
     />
 
