@@ -363,6 +363,48 @@ class CodedWordContextTests(unittest.TestCase):
         self.assertEqual(self.words("He said she was bossy."), [("bossy", "female")])
 
 
+class MisspelledTextTests(unittest.TestCase):
+    """The model often quotes a span with the writer's typos fixed. The quote
+    must map back onto the writer's own words (never corrected), and must not
+    land on the wrong words."""
+
+    def span(self, phrase, text):
+        m = analyzer._find_span_fuzzy(phrase, text)
+        return text[m.start():m.end()] if m else None
+
+    def test_split_merged_words_maps_to_original(self):
+        text = "Girlsare bad at math, so the engineering roleis better for boys."
+        self.assertEqual(self.span("Girls are bad at math", text), "Girlsare bad at math")
+        self.assertEqual(self.span("the engineering role is better for boys", text),
+                         "the engineering roleis better for boys")
+
+    def test_corrected_typos_map_to_original(self):
+        text = "Ang babea ay dpat nasa bhay lang at mag-alaga ng mga anak."
+        self.assertEqual(self.span("Ang babae ay dapat nasa bahay lang at mag-alaga ng mga anak", text),
+                         "Ang babea ay dpat nasa bhay lang at mag-alaga ng mga anak")
+
+    def test_refuses_opposite_gender(self):
+        self.assertIsNone(self.span("women are bad drivers", "Some say men are bad drivers."))
+        self.assertIsNone(self.span("girls are too weak", "They said boys are too weak."))
+
+    def test_refuses_short_or_unrelated_quotes(self):
+        self.assertIsNone(self.span("chairman", "The chairwoman spoke."))          # single word
+        self.assertIsNone(self.span("women belong in the kitchen", "The team shipped the release on time."))
+
+    def test_validation_keeps_respelled_finding_with_original_spelling(self):
+        text = "Girlsare bad at math."
+        kept, dropped = analyzer._validate_llm_items(
+            [_item("Girls are bad at math", "female", "stereotype")], text)
+        self.assertEqual([k["word"] for k in kept], ["Girlsare bad at math"])
+        self.assertEqual(dropped, [])
+
+    def test_misspelled_words_alone_never_trigger_lexicon(self):
+        for t in ["Everyone shouldwha have equal opportunities.",
+                  "The blorf team will zindle the projekt.",
+                  "The mandate requires a manual review of the mansion."]:
+            self.assertEqual(analyzer._pattern_detect(t), [], t)
+
+
 class BreakdownTests(unittest.TestCase):
     def test_breakdown_totals_100_and_splits_by_count(self):
         self.assertEqual(analyzer.bias_breakdown(0, 0, 0), (0, 0, 100))

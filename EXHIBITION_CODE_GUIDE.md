@@ -101,7 +101,8 @@ User types text, clicks "Analyze Text"
 | `_llm_analyze_chunk()` | ~779 | Tries each model in order; retries; skips a provider that's out of credits |
 | `_build_chain()` | ~84 | Builds the model order: Hugging Face Llama 3.1 → Groq gpt-oss-120b → gpt-oss-20b |
 | `_SYSTEM_PROMPT` | ~385 | The instructions given to the AI (what counts as bias, what does NOT) |
-| `_validate_llm_items()` | ~622 | **Safety check on AI output**: the word must really be in the text, valid type/category, a lone "her"/"he" is only accepted as a generic pronoun with a generic antecedent, family-member reports are not stereotypes |
+| `_find_span_fuzzy()` | ~582 | **Typos & merged words**: if the AI quotes a phrase with the writer's typos fixed ("Girls are" for "Girlsare"), maps it back onto the writer's own words so they get highlighted — the text is never corrected. Needs 3+ words, a close match, and no opposite-gender word |
+| `_validate_llm_items()` | ~710 | **Safety check on AI output**: the word must really be in the text, valid type/category, a lone "her"/"he" is only accepted as a generic pronoun with a generic antecedent, family-member reports are not stereotypes |
 | `_merge()` | ~902 | Combines lexicon + AI findings; drops AI duplicates of lexicon matches |
 | `_score()` | ~932 | Label (more male or female findings; tie → Male-Biased) and score by count: 1→20%, 2→35%, 3→50%, 4→60%, 5→70%, 6→78%, 7→84%, then +3% each (max 95%) |
 | `bias_breakdown()` | ~962 | Splits the score into Male % / Female % / Neutral % (always adds to 100) |
@@ -181,7 +182,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | No account guessing | `forgot_password()` ~925 | Same reply whether the email exists or not |
 | Google sign-in | `google_auth()` ~513 | Token verified **with Google's servers**, never trusted from the browser |
 | Safe HTML | `utils/biasHighlight.js` `escapeHtml()` | User text is escaped before highlighting (prevents XSS) |
-| AI output check | `_validate_llm_items()` analyzer.py ~622 | AI findings must exist in the text; invalid ones are dropped and logged |
+| AI output check | `_validate_llm_items()` analyzer.py ~710 | AI findings must exist in the text; invalid ones are dropped and logged |
 | Secrets | `.env` files (git-ignored), Render env vars | No keys in the code or in Git |
 
 ---

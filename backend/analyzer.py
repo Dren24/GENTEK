@@ -32,6 +32,7 @@ import re
 import os
 import json
 import time
+import difflib
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict
@@ -401,6 +402,12 @@ _SYSTEM_PROMPT = (
     "bias. Most texts "
     "contain no gender bias at all, and an empty list is the normal, correct answer for them. "
     "Never invent a finding to have something to report.\n\n"
+    "Writers make typos: missing or extra letters, words run together without a space, "
+    "informal or creative spellings (e.g. digits for letters). Read through them to what the "
+    "writer meant and judge that meaning exactly as you would correctly spelled text: a "
+    "misspelled biased claim is still biased, and a misspelled, merged, or unfamiliar word is "
+    "never bias by itself. When you quote a span, keep the writer's own spelling, typos and "
+    "missing spaces included; never correct them.\n\n"
     "Report a span ONLY if it fits one of these categories:\n"
     "- gendered_term: an occupational/role title, or a term for people in general, that excludes "
     "a gender where a common neutral form exists (chairman, fireman, stewardess, mankind, "
@@ -539,6 +546,87 @@ def _find_span_loose(phrase: str, text: str) -> Optional[re.Match]:
     return re.search(r'(?<!\w)' + pattern + r'(?!\w)', text.translate(_LOOKALIKES), re.IGNORECASE)
 
 
+class _Span:
+    """Minimal stand-in for re.Match (start()/end()) for fuzzy-matched spans."""
+    def __init__(self, start: int, end: int):
+        self._s, self._e = start, end
+
+    def start(self) -> int:
+        return self._s
+
+    def end(self) -> int:
+        return self._e
+
+
+_FUZZY_MIN_WORDS = 3       # short quotes could match the wrong words by accident
+_FUZZY_MIN_RATIO = 0.85    # letters-only similarity needed to accept a span
+
+
+def _gender_words(s: str) -> set:
+    """Which genders (female/male) a string names with a whole word."""
+    found = set()
+    for w in re.findall(r"[a-z']+", s.lower()):
+        if w in _FEMALE_CONTEXT_WORDS:
+            found.add("female")
+        elif w in _MALE_CONTEXT_WORDS:
+            found.add("male")
+    return found
+
+
+def _squash(s: str) -> str:
+    """Lower-case letters and digits only — spaces and punctuation removed, so
+    'Girlsare' and 'Girls are' compare equal."""
+    return re.sub(r"[\W_]+", "", s.lower())
+
+
+def _find_span_fuzzy(phrase: str, text: str) -> Optional[_Span]:
+    """Last-resort match for a quote the model silently respelled — it fixed
+    the writer's typos ('dapat nasa bahay' for 'dpat nasa bhay') or split
+    run-together words ('Girls are' for 'Girlsare'). Finds the run of whole
+    words in the text whose letters are most similar to the quote and returns
+    THAT span, so the user's own spelling is what gets highlighted; the text
+    is never corrected. Guards against matching the wrong words: the quote
+    needs 3+ words, a close letters-only similarity, and the span must not
+    name a gender the quote doesn't (so 'women are…' can't land on 'men are…')."""
+    phrase = phrase.translate(_LOOKALIKES)
+    if len(phrase.split()) < _FUZZY_MIN_WORDS:
+        return None
+    target = _squash(phrase)
+    if len(target) < 8:
+        return None
+    norm = text.translate(_LOOKALIKES)
+    words = [(m.start(), m.end()) for m in re.finditer(r"\S+", norm)]
+    lo, hi = 0.75 * len(target), 1.3 * len(target)
+    best, best_ratio = None, _FUZZY_MIN_RATIO
+    sm = difflib.SequenceMatcher(autojunk=False)
+    sm.set_seq2(target)
+    for i in range(len(words)):
+        for j in range(i, len(words)):
+            start, end = words[i][0], words[j][1]
+            cand = _squash(norm[start:end])
+            if len(cand) > hi:
+                break
+            if len(cand) < lo:
+                continue
+            sm.set_seq1(cand)
+            if sm.real_quick_ratio() < best_ratio or sm.quick_ratio() < best_ratio:
+                continue
+            r = sm.ratio()
+            if r > best_ratio:
+                best, best_ratio = (start, end), r
+    if not best:
+        return None
+    start, end = best
+    # Trim punctuation the window picked up at either edge
+    while start < end and not norm[start].isalnum():
+        start += 1
+    while end > start and not norm[end - 1].isalnum():
+        end -= 1
+    if _gender_words(norm[start:end]) - _gender_words(phrase):
+        return None
+    return _Span(start, end)
+
+
 # Used when the model flags real bias but leaves the reason empty — the
 # finding is kept rather than discarded over a missing explanation.
 _FALLBACK_REASONS = {
@@ -625,7 +713,8 @@ def _validate_llm_items(items: list, text: str) -> tuple:
 
     Grounding rules beyond basic shape checks:
     - The span must actually occur in this text; the stored word is the text's
-      own spelling so the frontend's highlighter finds it.
+      own spelling so the frontend's highlighter finds it (a quote the model
+      respelled is mapped back onto the writer's words by _find_span_fuzzy).
     - A lone pronoun/gendered word is only accepted as a generic_pronoun, and
       only when the model names an antecedent that appears in the text and is
       not itself gender-specific. 'her' in "you have found her" refers to a
@@ -642,7 +731,9 @@ def _validate_llm_items(items: list, text: str) -> tuple:
         category = str(d.get("category") or "").strip().lower()
         item_type = str(d.get("type") or "").strip().lower()
 
-        match = (_find_span(w, text) or _find_span_loose(w, text)) if w else None
+        # Exact quote → quote with a dropped filler word → quote the model
+        # respelled (fixed typos / split merged words); always the text's own span
+        match = (_find_span(w, text) or _find_span_loose(w, text) or _find_span_fuzzy(w, text)) if w else None
         if not match:
             dropped.append((w, "span not found in text"))
             continue
