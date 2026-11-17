@@ -1,9 +1,12 @@
 // ── AuthModal — login / signup / forgot password modal ───────────────────────
 // Opened by Navbar's "Log in" or "Sign up" buttons and the homepage CTA.
 // Internal views: 'login' | 'signup' | 'verify' | 'forgot' | 'done' | 'create-pw' | 'pw-created'
+// Layout: the overlay is sized to the visible screen (visualViewport), so on
+// phones the card shrinks above the keyboard and scrolls inside; the close
+// button sits outside the scroll area and is always reachable.
 // Pressing Escape or clicking outside closes the modal.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Eye, EyeSlash, EnvelopeSimple, LockKey, User, ArrowLeft, ShieldCheck, CheckCircle } from '@phosphor-icons/react'
 import GentekMark from './GentekLogo'
@@ -41,6 +44,19 @@ const passwordProblem = (pw) =>
 // ── Seconds before "Resend code" is allowed — matches CODE_RESEND_SECONDS on the backend
 const RESEND_SECONDS = 60
 
+// ── Touch devices: don't autofocus (it pops the keyboard over the form) ────
+const isTouch = () => typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+
+// ── Spinner — shared by every submit button ─────────────────────────────────
+function Spinner() {
+  return (
+    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+    </svg>
+  )
+}
+
 // view: 'login' | 'signup' | 'verify' | 'forgot' | 'done' | 'create-pw' | 'pw-created'
 export default function AuthModal({ mode = 'signup', onClose }) {
   const { login, register, loginWithGoogle, verifyCode, resendCode, createPassword } = useAuth()
@@ -49,7 +65,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
-  const [form, setForm]         = useState({ name: '', email: '', password: '' })
+  const [form, setForm]         = useState({ name: '', email: '', password: '', confirm: '' })
   const [resetEmail, setResetEmail] = useState('')
   const [remember, setRemember] = useState(true)
   // ── Emailed-code step: { email, purpose: 'verify' | 'login' | 'reset' } ──
@@ -62,6 +78,27 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   const [newPw, setNewPw]           = useState({ password: '', confirm: '' })
   const googleClientRef = useRef(null)
   const rememberRef     = useRef(true)
+  const scrollRef       = useRef(null)
+  // ── Visible screen area (shrinks when the phone keyboard opens) — the
+  // overlay is sized to it so the card always fits and scrolls inside. ──
+  const [vv, setVv] = useState(null)
+  useLayoutEffect(() => {
+    const v = window.visualViewport
+    if (!v) return
+    const update = () => setVv({ h: v.height, top: v.offsetTop })
+    update()
+    v.addEventListener('resize', update)
+    v.addEventListener('scroll', update)
+    return () => { v.removeEventListener('resize', update); v.removeEventListener('scroll', update) }
+  }, [])
+  // ── Keep the focused field visible above the keyboard ──
+  const revealField = (e) => {
+    const el = e.target
+    if (!isTouch() || !(el instanceof HTMLInputElement)) return
+    setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300)
+  }
+  // New view → back to the top of the card
+  useEffect(() => { scrollRef.current?.scrollTo(0, 0) }, [view])
 
   // ── Keep a ref mirror of `remember` so the Google callback (created once,
   // below) always reads the latest value without needing to be re-created ──
@@ -153,6 +190,12 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   // ── handleAuth — submit login or signup form ──────────────────────────────
   const handleAuth = async (e) => {
     e.preventDefault()
+    if (view === 'signup') {
+      // Same rule as the backend (_check_password_strength) — fail fast here
+      const problem = passwordProblem(form.password)
+      if (problem) { setError(problem); return }
+      if (form.password !== form.confirm) { setError('Passwords do not match.'); return }
+    }
     setLoading(true)
     setError('')
     try {
@@ -283,7 +326,8 @@ export default function AuthModal({ mode = 'signup', onClose }) {
     setShowPass(false)
     setLoading(false)
     setError('')
-    setForm({ name: '', email: '', password: '' })
+    // Keep the typed email when switching Log in ↔ Sign up
+    setForm(f => ({ name: '', email: f.email, password: '', confirm: '' }))
     setRemember(true)
     setPending(null)
     setCode('')
@@ -291,32 +335,48 @@ export default function AuthModal({ mode = 'signup', onClose }) {
   }
 
   // ── Shared input class — used for all text/email/password fields ──────────
-  const inputCls = "w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
+  // 16px on touch devices (incl. landscape phones): smaller text makes iPhone
+  // Safari zoom the page on focus. 14px only on mouse-driven desktops.
+  const inputCls = "w-full h-11 pl-10 pr-4 text-base [@media(hover:hover)_and_(min-width:640px)]:text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
 
   return (
+    // ── Overlay — sized to the VISIBLE screen (visualViewport), so on phones
+    // the card never runs under the keyboard, browser bars or notch. Padding
+    // respects safe areas; the card scrolls inside when it's taller than that.
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      className="fixed inset-x-0 top-0 z-[100] flex items-center justify-center px-3 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      style={{ height: vv ? `${vv.h}px` : '100dvh', transform: vv?.top ? `translateY(${vv.top}px)` : undefined }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onFocus={revealField}
     >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      {/* Backdrop — covers the whole page even while the overlay is keyboard-sized */}
+      <div className="fixed inset-0 -z-10 bg-black/40 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
 
       {/* ── Modal card ──────────────────────────────────────────────────── */}
-      <div className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-up">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={view === 'signup' ? 'Create your account' : view === 'login' ? 'Log in' : 'Account'}
+        className="relative w-full max-w-[400px] sm:max-w-md max-h-full flex flex-col bg-white dark:bg-gray-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-up"
+      >
 
-        {/* Close button — top-right corner */}
+        {/* Close button — outside the scroll area, so it's always visible */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors z-10"
+          aria-label="Close"
+          className="absolute top-2 right-2 sm:top-3 sm:right-3 w-10 h-10 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 bg-white/80 dark:bg-gray-900/80 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors z-10"
         >
           <X size={16} weight="bold" />
         </button>
+
+        <div ref={scrollRef} className="overflow-y-auto overscroll-contain min-h-0">
 
         {/* ── CREATE-PW view — offered once after Google sign-in when the
             account has no GENTEK password yet ────────────────────────────── */}
         {view === 'create-pw' && googleUser && (
           <>
-            <div className="px-8 pt-8 pb-5 text-center">
+            <div className="px-12 pt-7 sm:pt-8 pb-4 sm:pb-5 text-center">
               <div className="flex justify-center mb-4">
                 <GentekMark size={44} />
               </div>
@@ -327,7 +387,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               <p className="text-sm font-semibold text-brand-600 dark:text-brand-400 break-all mt-0.5">{googleUser.email}</p>
             </div>
 
-            <div className="px-8 pb-8 space-y-4">
+            <div className="px-5 sm:px-8 pb-6 sm:pb-8 space-y-4">
               <form onSubmit={handleCreatePassword} className="space-y-3">
                 <div className="relative">
                   <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -338,7 +398,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                     value={newPw.password}
                     onChange={(e) => { setNewPw(p => ({ ...p, password: e.target.value })); setError('') }}
                     required
-                    autoFocus
+                    autoFocus={!isTouch()}
                     className={`${inputCls} pr-10`}
                   />
                   <button
@@ -373,7 +433,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full btn-primary justify-center min-h-[44px] py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? 'Creating password…' : 'Create password'}
                 </button>
@@ -395,7 +455,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
 
         {/* ── PW-CREATED view ──────────────────────────────────────────────── */}
         {view === 'pw-created' && googleUser && (
-          <div className="p-10 flex flex-col items-center text-center">
+          <div className="px-6 py-8 sm:p-10 flex flex-col items-center text-center">
             <div className="w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
               <CheckCircle size={28} weight="fill" className="text-brand-500" />
             </div>
@@ -411,7 +471,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
 
         {/* ── SUCCESS view — shown after login or signup ─────────────────── */}
         {view === 'done' && (
-          <div className="p-10 flex flex-col items-center text-center">
+          <div className="px-6 py-8 sm:p-10 flex flex-col items-center text-center">
             {/* GENTEK logo confirmation icon */}
             <div className="w-16 h-16 rounded-2xl bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center mb-5">
               <GentekMark size={44} />
@@ -431,7 +491,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             login from a new browser ─────────────────────────────────────── */}
         {view === 'verify' && pending && (
           <>
-            <div className="px-8 pt-8 pb-5 text-center">
+            <div className="px-12 pt-7 sm:pt-8 pb-4 sm:pb-5 text-center">
               <div className="flex justify-center mb-4">
                 <div className="w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
                   <ShieldCheck size={28} weight="duotone" className="text-brand-600" />
@@ -452,7 +512,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">The code expires in 5 minutes.</p>
             </div>
 
-            <div className="px-8 pb-8 space-y-4">
+            <div className="px-5 sm:px-8 pb-6 sm:pb-8 space-y-4">
               <form onSubmit={handleVerify} className="space-y-3">
                 <input
                   type="text"
@@ -463,7 +523,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   value={code}
                   onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setError('') }}
                   required
-                  autoFocus
+                  autoFocus={!isTouch()}
                   aria-label="6-digit code"
                   className="w-full py-3 text-center text-2xl font-bold tracking-[0.5em] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-400/40 focus:border-brand-400 transition"
                 />
@@ -482,14 +542,11 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                 <button
                   type="submit"
                   disabled={loading || code.length !== 6}
-                  className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full btn-primary justify-center min-h-[44px] py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
+                      <Spinner />
                       Verifying…
                     </span>
                   ) : pending.purpose === 'verify' ? 'Verify and continue' : 'Verify code'}
@@ -524,7 +581,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
         {view === 'forgot' && (
           <>
             {/* Header with logo */}
-            <div className="px-8 pt-8 pb-5 text-center">
+            <div className="px-12 pt-7 sm:pt-8 pb-4 sm:pb-5 text-center">
               <div className="flex justify-center mb-4">
                 <GentekMark size={44} />
               </div>
@@ -535,7 +592,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
             </div>
 
             {/* Reset form body */}
-            <div className="px-8 pb-8 space-y-4">
+            <div className="px-5 sm:px-8 pb-6 sm:pb-8 space-y-4">
               <form onSubmit={handleForgot} className="space-y-3">
                 {/* Email field */}
                 <div className="relative">
@@ -546,7 +603,7 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                     value={resetEmail}
                     onChange={(e) => setResetEmail(e.target.value)}
                     required
-                    autoFocus
+                    autoFocus={!isTouch()}
                     className={inputCls}
                   />
                 </div>
@@ -555,14 +612,11 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full btn-primary justify-center min-h-[44px] py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
+                      <Spinner />
                       Sending code…
                     </span>
                   ) : 'Send code'}
@@ -581,68 +635,37 @@ export default function AuthModal({ mode = 'signup', onClose }) {
           </>
         )}
 
-        {/* ── LOGIN / SIGNUP views ─────────────────────────────────────────── */}
+        {/* ── LOGIN / SIGNUP views — email form first, then Google, then the
+            link to the other view (switching never closes the modal) ──── */}
         {(view === 'login' || view === 'signup') && (
           <>
-            {/* Header with logo and headline */}
-            <div className="px-8 pt-8 pb-6 text-center">
-              <div className="flex justify-center mb-4">
-                <GentekMark size={44} />
+            {/* Header — logo + heading; compact on phones and short screens */}
+            <div className="px-12 pt-6 sm:pt-8 pb-4 sm:pb-5 text-center [@media(max-height:480px)]:pt-4 [@media(max-height:480px)]:pb-3">
+              <div className="flex justify-center mb-3 [@media(max-height:480px)]:hidden">
+                <GentekMark size={40} />
               </div>
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
-                {view === 'signup' ? 'Create your free account' : 'Welcome back'}
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+                {view === 'signup' ? 'Create Your Account' : 'Welcome Back'}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {view === 'signup'
-                  ? 'Start detecting gender bias — free forever, no card needed.'
-                  : 'Sign in to continue to GENTEK.'}
+                  ? 'Start detecting gender bias — free, no card needed.'
+                  : 'Log in to continue to GENTEK.'}
               </p>
             </div>
 
-            {/* ── Tab switcher — Log in / Sign up toggle ──────────────────── */}
-            <div className="mx-8 mb-6 flex bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
-              {['login', 'signup'].map(t => (
-                <button
-                  key={t}
-                  onClick={() => switchTab(t)}
-                  className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${
-                    view === t
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                  }`}
-                >
-                  {t === 'login' ? 'Log in' : 'Sign up'}
-                </button>
-              ))}
-            </div>
-
-            <div className="px-8 pb-8 space-y-4">
-              {/* ── Google OAuth — verified server-side via /auth/google ── */}
-              <button
-                type="button"
-                onClick={handleGoogleClick}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <GoogleIcon />
-                Continue with Google
-              </button>
-
-              {/* OR divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
-                <span className="text-xs text-gray-400 dark:text-gray-500">or</span>
-                <div className="flex-1 h-px bg-gray-100 dark:bg-gray-800" />
-              </div>
-
+            <div className="px-5 sm:px-8 pb-6 sm:pb-8">
               {/* ── Email + password form ─────────────────────────────────── */}
               <form onSubmit={handleAuth} className="space-y-3">
-                {/* Full name field — signup only */}
+                {/* Full name — signup only */}
                 {view === 'signup' && (
                   <div className="relative">
                     <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <input
                       type="text"
+                      name="name"
+                      autoComplete="name"
+                      aria-label="Full name"
                       placeholder="Full name"
                       value={form.name}
                       onChange={set('name')}
@@ -652,11 +675,17 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   </div>
                 )}
 
-                {/* Email field */}
+                {/* Email */}
                 <div className="relative">
                   <EnvelopeSimple size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
                     type="email"
+                    name="email"
+                    autoComplete="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    aria-label="Email address"
                     placeholder="Email address"
                     value={form.email}
                     onChange={set('email')}
@@ -665,86 +694,139 @@ export default function AuthModal({ mode = 'signup', onClose }) {
                   />
                 </div>
 
-                {/* Password field with show/hide toggle */}
+                {/* Password — eye toggle shows/hides it (and Confirm, on signup) */}
                 <div className="relative">
                   <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
                     type={showPass ? 'text' : 'password'}
+                    name="password"
+                    autoComplete={view === 'signup' ? 'new-password' : 'current-password'}
+                    aria-label="Password"
                     placeholder="Password"
                     value={form.password}
                     onChange={set('password')}
                     required
-                    className={`${inputCls} pr-10`}
+                    className={`${inputCls} pr-11`}
                   />
-                  {/* Eye toggle — show/hide password */}
                   <button
                     type="button"
                     onClick={() => setShowPass(s => !s)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    aria-label={showPass ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPass}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                   >
-                    {showPass ? <EyeSlash size={15} /> : <Eye size={15} />}
+                    {showPass ? <EyeSlash size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
 
-                {/* Remember me + Forgot password — login view only */}
+                {/* Confirm password + rule — signup only */}
+                {view === 'signup' && (
+                  <>
+                    <div className="relative">
+                      <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <input
+                        type={showPass ? 'text' : 'password'}
+                        name="confirm-password"
+                        autoComplete="new-password"
+                        aria-label="Confirm password"
+                        placeholder="Confirm password"
+                        value={form.confirm}
+                        onChange={set('confirm')}
+                        required
+                        className={inputCls}
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 px-1">At least 8 characters, including a letter and a number.</p>
+                  </>
+                )}
+
+                {/* Remember me + Forgot password — login only */}
                 {view === 'login' && (
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                  <div className="flex items-center justify-between -my-1">
+                    <label className="flex items-center gap-2 min-h-[40px] text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={remember}
                         onChange={(e) => setRemember(e.target.checked)}
-                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-400 focus:ring-offset-0"
+                        className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-400 focus:ring-offset-0"
                       />
                       Remember me
                     </label>
                     <button
                       type="button"
-                      onClick={() => { setResetEmail(form.email); setView('forgot') }}
-                      className="text-xs text-brand-600 dark:text-brand-400 hover:underline transition-colors"
+                      onClick={() => { setResetEmail(form.email); setError(''); setView('forgot') }}
+                      className="min-h-[40px] text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline"
                     >
                       Forgot password?
                     </button>
                   </div>
                 )}
 
-                {/* Error message banner */}
+                {/* Error banner */}
                 {error && (
-                  <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">
+                  <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">
                     {error}
                   </p>
                 )}
 
-                {/* Submit button — calls login or register depending on view */}
+                {/* Primary submit */}
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full btn-primary justify-center py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full btn-primary justify-center min-h-[44px] py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
-                      {view === 'signup' ? 'Creating account…' : 'Signing in…'}
+                      <Spinner />
+                      {view === 'signup' ? 'Creating account…' : 'Logging in…'}
                     </span>
-                  ) : view === 'signup' ? 'Create free account' : 'Sign in'}
+                  ) : view === 'signup' ? 'Create Account' : 'Log in'}
                 </button>
               </form>
 
-              {/* Terms & Privacy notice — signup only */}
+              {/* OR divider — separates email login from Google */}
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                <span className="text-xs text-gray-400 dark:text-gray-500">or</span>
+                <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+              </div>
+
+              {/* ── Google OAuth — verified server-side via /auth/google ── */}
+              <button
+                type="button"
+                onClick={handleGoogleClick}
+                disabled={loading}
+                className="w-full min-h-[44px] flex items-center justify-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <GoogleIcon />
+                Continue with Google
+              </button>
+
+              {/* Terms — signup only */}
               {view === 'signup' && (
-                <p className="text-center text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
+                <p className="mt-3 text-center text-[11px] text-gray-400 dark:text-gray-500 leading-relaxed">
                   By signing up you agree to our{' '}
-                  <span className="text-brand-600 dark:text-brand-400 cursor-pointer hover:underline">Terms</span>
+                  <a href="/terms" target="_blank" rel="noopener" className="text-brand-600 dark:text-brand-400 hover:underline">Terms</a>
                   {' '}and{' '}
-                  <span className="text-brand-600 dark:text-brand-400 cursor-pointer hover:underline">Privacy Policy</span>.
+                  <a href="/privacy" target="_blank" rel="noopener" className="text-brand-600 dark:text-brand-400 hover:underline">Privacy Policy</a>.
                 </p>
               )}
+
+              {/* Switch view — stays inside the modal */}
+              <p className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                {view === 'signup' ? 'Already have an account?' : "Don't have an account?"}{' '}
+                <button
+                  type="button"
+                  onClick={() => switchTab(view === 'signup' ? 'login' : 'signup')}
+                  className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                >
+                  {view === 'signup' ? 'Log in' : 'Sign up'}
+                </button>
+              </p>
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   )
