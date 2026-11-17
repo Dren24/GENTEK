@@ -195,6 +195,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | `components/shared/AuthModal.jsx` | All login screens: Log in, Sign up, enter code, forgot password, create password |
 | `components/shared/AppSidebar.jsx` | History list, search, pinned items; on phones it slides over the page |
 | `pages/HomePage.jsx` `normalizeApiResult()` | Converts the backend reply into what's displayed |
+| `pages/HomePage.jsx` `startEditing()` / `saveEdits()` | **Edit Text** after analysis: edits a draft copy; Cancel keeps the results, Save Changes replaces the text and clears the old highlights/percentages so they can never describe edited text. Nothing is sent or saved to history until the user clicks Analyze Text again. Rewritten text is always directly editable. |
 | `App.jsx` | Routes (which page shows for which URL) and the overall layout |
 
 ---

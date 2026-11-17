@@ -11,6 +11,9 @@
 //   normalizeApiResult() backend reply → page state (highlights, %, label)
 //   applyFix()           click a suggestion → replace that word only
 //   rewriteText()        "Rewrite Text" → apply every suggestion at once
+//   startEditing() / saveEdits() / cancelEditing()
+//                        "Edit Text" on analyzed text → Save clears the old
+//                        results so the edited text is analyzed again
 //   Results panel JSX    search for "Analysis percentages"
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
@@ -21,7 +24,7 @@ import {
   UploadSimple, FilePdf, FileDoc, FileTxt,
   Command, ArrowElbowDownLeft, Sparkle, ShieldCheck,
   Lightning, Users, ChartBar, Check, X, CaretDown, CaretUp,
-  PencilSimple, CheckCircle,
+  PencilSimple, CheckCircle, FloppyDisk, NotePencil,
 } from '@phosphor-icons/react'
 import * as pdfjsLib from 'pdfjs-dist'
 import mammoth from 'mammoth'
@@ -336,6 +339,16 @@ export default function HomePage() {
   // rewrite and no way back to editing), so this drives a "Gender-Neutral"
   // status next to the still-editable text until the text changes.
   const [cleanResult, setCleanResult] = useState(null)
+  // ── Edit mode for analyzed text — "Edit Text" opens the highlighted result
+  // as a plain textarea holding a draft copy. Cancel returns to the results
+  // untouched; Save Changes writes the draft back and clears the now-outdated
+  // results so the user analyzes the edited version again.
+  const [editing, setEditing]    = useState(false)
+  const [draft, setDraft]        = useState('')
+  // Hint under the editor after Rewrite Text / Save Changes: { kind, text }.
+  // Only shown while the editor still holds exactly that text, unanalyzed.
+  const [editNotice, setEditNotice] = useState(null)
+  const draftRef                 = useRef(null)
   const textareaRef              = useRef(null)
   const resultsRef               = useRef(null)        // highlighted-results box — the word popup anchors to marks inside it
   const overlayRef               = useRef(null)        // mirrors textarea scroll for the Free-limit fade overlay
@@ -516,6 +529,8 @@ export default function HomePage() {
 
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
   const charCount = text.length
+  // Word count shown in the status bar — the draft's while editing
+  const shownWords = editing ? (draft.trim() ? draft.trim().split(/\s+/).length : 0) : wordCount
   const showPanel = analyzing || results   // true = compact hero + hide guest headline
 
   // ── classificationInfo — display label + dot color for the actual
@@ -619,7 +634,7 @@ export default function HomePage() {
       return
     }
 
-    setAna(true); setResults(null); setCleanResult(null)
+    setAna(true); setResults(null); setCleanResult(null); setEditNotice(null)
     let succeeded = false
     try {
       const res = await fetch('/analyze', {
@@ -735,8 +750,51 @@ export default function HomePage() {
     const out = rewriteAll(text, results.detected)
     setText(out)
     setResults(null)
+    setCleanResult(null)
     pushTextStack(out)
+    setEditNotice({ kind: 'rewritten', text: out })
+    // The rewritten text lands in the normal, fully editable textarea
+    setTimeout(() => textareaRef.current?.focus(), 50)
   }
+
+  // ── Edit Text / Save Changes / Cancel — editing the analyzed text ─────────
+  const limitGuestWords = (val) => {
+    if (user) return val
+    const words = val.trim() ? val.trim().split(/\s+/) : []
+    return words.length > GUEST_WORD_LIMIT ? words.slice(0, GUEST_WORD_LIMIT).join(' ') : val
+  }
+  const startEditing = () => {
+    setWordPopup(null)
+    setDraft(text)
+    setEditing(true)
+    setTimeout(() => {
+      const el = draftRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }, 50)
+  }
+  const cancelEditing = () => { setEditing(false); setDraft('') }
+  const saveEdits = () => {
+    if (!draft.trim()) return
+    setEditing(false)
+    // Nothing changed → the existing results still describe this text exactly
+    if (draft === text) return
+    // Text changed → every old highlight, percentage and classification is
+    // stale. Drop them; the user re-runs Analyze Text on the edited version
+    // (that run is what saves history, as with any other analysis).
+    setText(draft)
+    setResults(null)
+    setCleanResult(null)
+    pushTextStack(draft)
+    setEditNotice({ kind: 'edited', text: draft })
+    setDraft('')
+    setTimeout(() => textareaRef.current?.focus(), 50)
+  }
+  // Any other path that clears the results (undo, upload, history, delete…)
+  // also ends edit mode, so a stale draft can never be saved over new text.
+  useEffect(() => { if (!results) setEditing(false) }, [results])
+  const shownNotice = editNotice && !results && !analyzing && editNotice.text === text ? editNotice : null
 
   // ── Close the word popup whenever a new analysis result comes in ─────────
   useEffect(() => { setWordPopup(null) }, [results])
@@ -886,7 +944,24 @@ export default function HomePage() {
                   spot shows the highlighted, clickable analyzed text afterwards.
                   Free-tier users past FREE_WORD_LIMIT see the overflow faded and
                   locked out of analysis, in both states, without losing a word. ── */}
-              {results ? (
+              {results && editing ? (
+                // ── Edit mode: the analyzed text as a plain, editable draft.
+                // Esc = Cancel, Cmd/Ctrl+Enter = Save Changes. ──
+                <textarea
+                  ref={draftRef}
+                  value={draft}
+                  onChange={e => setDraft(limitGuestWords(e.target.value))}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEditing() }
+                    else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveEdits() }
+                  }}
+                  aria-label="Edit analyzed text"
+                  placeholder="Text can't be empty — use Delete to clear the editor."
+                  rows={10}
+                  className="w-full px-6 py-5 text-[15px] text-gray-800 dark:text-gray-100 leading-relaxed resize-none outline-none bg-brand-50/30 dark:bg-brand-900/10 ring-1 ring-inset ring-brand-300/60 dark:ring-brand-700/60 placeholder-gray-300 dark:placeholder-gray-600 editor-scroll"
+                  style={{ minHeight: '15rem' }}
+                />
+              ) : results ? (
                 <div
                   ref={resultsRef}
                   onClick={handleMarkClick}
@@ -959,6 +1034,19 @@ export default function HomePage() {
                 />
               )}
 
+              {/* ── Hint after Rewrite Text / Save Changes — the text is editable
+                  and the old results are gone until it's analyzed again ── */}
+              {shownNotice && (
+                <div className="mx-5 mb-3 flex items-start gap-2 text-xs text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-xl px-3 py-2">
+                  <NotePencil size={14} weight="bold" className="flex-shrink-0 mt-px" />
+                  <span>
+                    {shownNotice.kind === 'rewritten'
+                      ? 'Text rewritten. You can edit it freely, then click Analyze Text to check the new version.'
+                      : 'Changes saved. Previous results were cleared — click Analyze Text to get updated results.'}
+                  </span>
+                </div>
+              )}
+
               {/* ── Quick sample chips — guests only ─────────────────────── */}
               {!user && (
                 <div className="px-5 pb-4 flex flex-wrap gap-2">
@@ -980,8 +1068,8 @@ export default function HomePage() {
                   {!user ? (
                     <>
                       {/* Guest word counter — red at limit, amber at 80% */}
-                      <span className={`font-semibold ${wordCount >= GUEST_WORD_LIMIT ? 'text-rose-500' : wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
-                        {wordCount}/{GUEST_WORD_LIMIT} words
+                      <span className={`font-semibold ${shownWords >= GUEST_WORD_LIMIT ? 'text-rose-500' : shownWords >= Math.round(GUEST_WORD_LIMIT * 0.8) ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        {shownWords}/{GUEST_WORD_LIMIT} words
                       </span>
                       {/* "Upgrade for unlimited" nudge — shown at ≥80 words */}
                       {wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) && (
@@ -1006,10 +1094,11 @@ export default function HomePage() {
                     <>
                       {/* Logged-in: show word count, char count, keyboard shortcut */}
                       <span className={lockedTail ? 'font-semibold text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}>
-                        {wordCount} words{lockedTail && ` · ${FREE_WORD_LIMIT} will be analyzed`}
+                        {shownWords} words{lockedTail && !editing && ` · ${FREE_WORD_LIMIT} will be analyzed`}
+                        {editing && freeLimitActive && shownWords > FREE_WORD_LIMIT && ` · ${FREE_WORD_LIMIT} will be analyzed`}
                       </span>
                       <span className="text-gray-200 dark:text-gray-700">|</span>
-                      <span className="text-gray-400 dark:text-gray-500">{charCount} chars</span>
+                      <span className="text-gray-400 dark:text-gray-500">{editing ? draft.length : charCount} chars</span>
                       {/* Upgrade nudge — Free users who exceeded the word limit */}
                       {lockedTail && (
                         <button onClick={openPricing} className="text-brand-600 dark:text-brand-400 hover:underline font-semibold">
@@ -1025,8 +1114,27 @@ export default function HomePage() {
                     </>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  {!results ? (
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {results && editing ? (
+                    <>
+                      {/* Edit mode — Cancel keeps the results; Save clears them */}
+                      <button
+                        onClick={cancelEditing}
+                        className="text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white border border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 px-4 py-2 rounded-xl transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={saveEdits}
+                        disabled={!draft.trim()}
+                        title={!draft.trim() ? "Text can't be empty — use Delete to clear the editor" : undefined}
+                        className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm px-6 py-2 rounded-xl shadow-btn hover:shadow-none active:scale-95 transition-all"
+                      >
+                        <FloppyDisk size={15} weight="bold" />
+                        Save Changes
+                      </button>
+                    </>
+                  ) : !results ? (
                     <>
                       {/* Try Sample — guests only, loads male-biased sample */}
                       {!user && (
@@ -1049,7 +1157,16 @@ export default function HomePage() {
                       </button>
                     </>
                   ) : results.detected.length > 0 ? (
-                    /* Rewrite Text — replaces the editor text in place, then resets to pre-analysis state */
+                    <>
+                    {/* Edit Text — edit the analyzed text by hand, then analyze again */}
+                    <button
+                      onClick={startEditing}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-600 px-4 py-2 rounded-xl transition-all"
+                    >
+                      <NotePencil size={14} weight="bold" />
+                      Edit Text
+                    </button>
+                    {/* Rewrite Text — replaces the editor text in place, then resets to pre-analysis state */}
                     <button
                       onClick={rewriteText}
                       className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm px-6 py-2 rounded-xl shadow-btn hover:shadow-none active:scale-95 transition-all"
@@ -1057,13 +1174,24 @@ export default function HomePage() {
                       <PencilSimple size={14} weight="bold" />
                       Rewrite Text
                     </button>
+                    </>
                   ) : (
+                    <>
                     /* Nothing to rewrite — confirm the text was analyzed, without
                        claiming certainty that it's guaranteed bias-free */
                     <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 dark:text-brand-400">
                       <CheckCircle size={16} weight="fill" />
                       Analyzed — No significant bias detected
                     </span>
+                    {/* Every suggestion applied by hand — still allow editing */}
+                    <button
+                      onClick={startEditing}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-400 dark:hover:border-brand-600 px-4 py-2 rounded-xl transition-all"
+                    >
+                      <NotePencil size={14} weight="bold" />
+                      Edit Text
+                    </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -1072,7 +1200,8 @@ export default function HomePage() {
                   overall score (always total 100%) + Classification. Shown for every
                   result, including no-bias ones (shownClean). ───────────────────── */}
               {shownAnalysis && breakdown && (
-                <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-800">
+                <div className={`px-5 py-4 border-t border-gray-100 dark:border-gray-800 transition-opacity ${editing ? 'opacity-50' : ''}`}
+                  title={editing ? 'These results are for the text before your edits — save and analyze again to update them' : undefined}>
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
