@@ -3,9 +3,12 @@
 // app — matches a "landing" aesthetic for plan selection.
 // Data imported from src/data/plans.js (same source as PricingModal).
 
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Check, X, ArrowRight, ArrowLeft, Star, Lightning } from '@phosphor-icons/react'
 import { PLANS, COMPARISON } from '../data/plans'
+import { useAuth } from '../context/AuthContext'
+import PaymentModal from '../components/shared/PaymentModal'
 
 // ── Cell — renders a comparison table cell value ───────────────────────────────
 // true → blue check, false → gray X, string → the text itself
@@ -17,7 +20,7 @@ function Cell({ val }) {
 
 // ── PlanCard — one plan column on the PricingPage ─────────────────────────────
 // Dark variant (gray-800/gray-900) — page-level dark bg makes these stand out.
-function PlanCard({ plan }) {
+function PlanCard({ plan, onUpgrade }) {
   // ── Price (₱/month; Premium is a one-time 30-day pass) ───────────────────
   const price = plan.price
 
@@ -64,13 +67,21 @@ function PlanCard({ plan }) {
       </div>
 
       {/* ── CTA button — links to home editor ───────────────────────────── */}
-      {plan.ctaStyle === 'primary' ? (
-        // Premium — solid blue button with arrow
+      {plan.ctaStyle === 'primary' && onUpgrade ? (
+        // Premium (logged in) — opens checkout right here
+        <button
+          onClick={() => onUpgrade(plan)}
+          className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors mb-6 flex items-center justify-center gap-1.5"
+        >
+          {plan.cta} <ArrowRight size={13} weight="bold" />
+        </button>
+      ) : plan.ctaStyle === 'primary' ? (
+        // Premium (guest) — an account is needed first, so go to the editor to sign up
         <Link
           to="/"
           className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors mb-6 flex items-center justify-center gap-1.5"
         >
-          {plan.cta} <ArrowRight size={13} weight="bold" />
+          Sign up to upgrade <ArrowRight size={13} weight="bold" />
         </Link>
       ) : (
         // Free — ghost border button
@@ -106,6 +117,8 @@ function PlanCard({ plan }) {
 // ════════════════════════ PRICING PAGE ═══════════════════════════════════════
 export default function PricingPage() {
   const navigate            = useNavigate()
+  const { user }            = useAuth()
+  const [paying, setPaying] = useState(null)   // plan being checked out (logged-in users)
 
   return (
     <main className="pt-14 min-h-screen bg-gray-950">
@@ -142,7 +155,7 @@ export default function PricingPage() {
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
           <div className="grid sm:grid-cols-2 gap-5 items-stretch">
             {PLANS.map(plan => (
-              <PlanCard key={plan.id} plan={plan} />
+              <PlanCard key={plan.id} plan={plan} onUpgrade={user ? setPaying : null} />
             ))}
           </div>
         </div>
@@ -192,6 +205,10 @@ export default function PricingPage() {
           </Link>
         </div>
       </section>
+      {/* Checkout — same PayPal card flow as the upgrade popup */}
+      {paying && (
+        <PaymentModal plan={paying} onClose={() => setPaying(null)} onUpgraded={() => setPaying(null)} />
+      )}
     </main>
   )
 }

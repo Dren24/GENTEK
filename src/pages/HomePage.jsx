@@ -851,7 +851,7 @@ export default function HomePage() {
               </div>
               {/* Main headline */}
               <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-gray-900 dark:text-white leading-[1.1] tracking-tight mb-4">
-                Make Your Writing<br className="hidden sm:block" />
+                Make Your Writing{' '}<br className="hidden sm:block" />
                 <span className="text-gradient">More Inclusive</span>
               </h1>
               <p className="text-gray-500 dark:text-gray-400 text-lg max-w-2xl mx-auto leading-relaxed">
