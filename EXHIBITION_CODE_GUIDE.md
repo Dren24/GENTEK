@@ -150,7 +150,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | `GET /payments/config` | PayPal public client ID, prices, test/live mode |
 | `POST /payments/orders` 🔒 | Start a PayPal payment (server sets the price) |
 | `POST /payments/orders/{id}/capture` 🔒 | Take the money, verify it with PayPal → Premium on |
-| `GET /payments/status` 🔒 | Current plan (Premium ends by itself after 30/365 days) |
+| `GET /payments/status` 🔒 | Current plan (Premium ends by itself after 30 days) |
 | `POST /payments/cancel` / `resume` 🔒 | Cancel (Premium stays on until the paid end date, then Free) / undo |
 
 **How the frontend calls them:** almost all go through `src/context/AuthContext.jsx` (e.g. `login()`, `verifyCode()`, `addToHistory()`), which adds the token with `authHeader()` and logs the user out automatically if the server says the token expired (`authFetch`, 401).

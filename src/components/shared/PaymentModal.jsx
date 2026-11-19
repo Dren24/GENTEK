@@ -10,7 +10,7 @@
 //   paid  → onApprove   → POST /payments/orders/{id}/capture
 //        → server confirms the money with PayPal and turns Premium on
 //        → applyPlan(new plan fields) → SuccessScreen
-// Premium is one-time: 30 days (monthly) or 365 days (annual), no auto-renew.
+// Premium is one-time: ₱599 for 30 days, no auto-renew.
 
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -75,9 +75,9 @@ function SuccessScreen({ premiumUntil, testMode, onDone }) {
 }
 
 // ════════════════════════ PAYMENT MODAL ══════════════════════════════════════
-export default function PaymentModal({ plan, annual = false, onClose, onUpgraded }) {
+export default function PaymentModal({ plan, onClose, onUpgraded }) {
   const { user, authHeader, applyPlan, logout } = useAuth()
-  const [billing, setBilling] = useState(annual ? 'annual' : 'monthly')
+  const billing = 'monthly'   // the only plan (30 days)
   const [config, setConfig]   = useState(null)       // /payments/config response
   const [status, setStatus]   = useState('loading')  // loading | ready | unavailable
   const [busy, setBusy]       = useState(false)      // capturing the payment
@@ -176,7 +176,7 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
   if (!plan) return null
 
   const planInfo = config?.plans?.[billing]
-  const amount = planInfo?.amount ?? (billing === 'annual' ? plan.annualPrice * 12 : plan.price)
+  const amount = planInfo?.amount ?? plan.price
   const testMode = config?.mode === 'sandbox'
 
   return (
@@ -209,30 +209,12 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
               <h2 id="payment-title" className="text-xl font-bold text-gray-900 dark:text-white pr-10">{plan.name}</h2>
               <p className="text-3xl font-extrabold text-gray-900 dark:text-white mt-1">
                 {peso(amount)}
-                <span className="text-sm font-normal text-gray-400 ml-1">{billing === 'annual' ? 'for 1 year' : 'for 1 month'}</span>
+                <span className="text-sm font-normal text-gray-400 ml-1">for 30 days</span>
               </p>
 
-              {/* ── Monthly / Annual ────────────────────────────────────────── */}
-              <div className="grid grid-cols-2 gap-1 p-1 mt-4 rounded-xl bg-gray-100 dark:bg-gray-800" role="radiogroup" aria-label="Billing period">
-                {['monthly', 'annual'].map(b => (
-                  <button
-                    key={b}
-                    role="radio"
-                    aria-checked={billing === b}
-                    disabled={busy}
-                    onClick={() => setBilling(b)}
-                    className={`py-2 rounded-lg text-xs font-semibold transition-colors ${billing === b
-                      ? 'bg-white dark:bg-gray-950 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'}`}
-                  >
-                    {b === 'monthly' ? '1 month' : '1 year · save 25%'}
-                  </button>
-                ))}
-              </div>
-
-              <p className="flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-3">
+              <p className="flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-4">
                 <Info size={14} className="flex-shrink-0 mt-px" />
-                One-time payment. Premium lasts {billing === 'annual' ? '365' : '30'} days and does not renew automatically.
+                One-time payment. Premium lasts 30 days and does not renew automatically.
               </p>
 
               {testMode && status === 'ready' && (

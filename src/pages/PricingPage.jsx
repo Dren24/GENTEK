@@ -3,7 +3,6 @@
 // app — matches a "landing" aesthetic for plan selection.
 // Data imported from src/data/plans.js (same source as PricingModal).
 
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Check, X, ArrowRight, ArrowLeft, Star, Lightning } from '@phosphor-icons/react'
 import { PLANS, COMPARISON } from '../data/plans'
@@ -18,9 +17,9 @@ function Cell({ val }) {
 
 // ── PlanCard — one plan column on the PricingPage ─────────────────────────────
 // Dark variant (gray-800/gray-900) — page-level dark bg makes these stand out.
-function PlanCard({ plan, annual }) {
-  // ── Price — apply annual discount to premium plan only ──────────────────
-  const price = plan.price === 0 ? 0 : annual ? plan.annualPrice : plan.price
+function PlanCard({ plan }) {
+  // ── Price (₱/month; Premium is a one-time 30-day pass) ───────────────────
+  const price = plan.price
 
   return (
     <div className={`
@@ -57,12 +56,6 @@ function PlanCard({ plan, annual }) {
               <span className="text-5xl font-extrabold text-white">₱{price.toLocaleString()}</span>
               <span className="text-gray-400 text-sm mb-1.5">/month</span>
             </div>
-            {/* Annual saving notice — only when annual toggle is on */}
-            {annual && (
-              <p className="text-[11px] text-green-400 font-semibold mb-1">
-                Billed annually — save ₱{((plan.price - plan.annualPrice) * 12).toLocaleString()}/yr
-              </p>
-            )}
           </>
         )}
 
@@ -112,7 +105,6 @@ function PlanCard({ plan, annual }) {
 
 // ════════════════════════ PRICING PAGE ═══════════════════════════════════════
 export default function PricingPage() {
-  const [annual, setAnnual] = useState(false)
   const navigate            = useNavigate()
 
   return (
@@ -129,7 +121,7 @@ export default function PricingPage() {
         </button>
       </div>
 
-      {/* ── Hero — page title + monthly/annual toggle ─────────────────────── */}
+      {/* ── Hero — page title ────────────────────────────────────────────── */}
       <section className="py-14 text-center">
         <div className="max-w-xl mx-auto px-4">
           {/* "Simple pricing" badge pill */}
@@ -138,35 +130,10 @@ export default function PricingPage() {
             Simple pricing
           </div>
           <h1 className="text-4xl font-bold text-white mb-3">Free or Premium.<br />You decide.</h1>
-          <p className="text-gray-400 text-base mb-8">
+          <p className="text-gray-400 text-base">
             Start free today. Upgrade whenever you need the full power of GENTEK.
           </p>
 
-          {/* ── Monthly / Annual toggle ─────────────────────────────────── */}
-          <div className="flex items-center justify-center gap-3">
-            {/* Monthly text — highlighted when not annual */}
-            <button
-              onClick={() => setAnnual(false)}
-              className={`text-sm font-medium transition-colors ${!annual ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}
-            >
-              Monthly
-            </button>
-            {/* Toggle pill */}
-            <button
-              onClick={() => setAnnual(o => !o)}
-              className={`relative w-11 h-6 rounded-full transition-colors ${annual ? 'bg-blue-600' : 'bg-gray-700'}`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${annual ? 'translate-x-5' : ''}`} />
-            </button>
-            {/* Annual text — highlighted when annual, with "Save 25%" green badge */}
-            <button
-              onClick={() => setAnnual(true)}
-              className={`text-sm font-medium flex items-center gap-1.5 transition-colors ${annual ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}
-            >
-              Annual
-              <span className="bg-green-900/60 text-green-400 text-[10px] font-bold px-2 py-0.5 rounded-full">Save 25%</span>
-            </button>
-          </div>
         </div>
       </section>
 
@@ -175,7 +142,7 @@ export default function PricingPage() {
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
           <div className="grid sm:grid-cols-2 gap-5 items-stretch">
             {PLANS.map(plan => (
-              <PlanCard key={plan.id} plan={plan} annual={annual} />
+              <PlanCard key={plan.id} plan={plan} />
             ))}
           </div>
         </div>

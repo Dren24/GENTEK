@@ -62,8 +62,7 @@ class PaymentTests(unittest.TestCase):
         self.env = mock.patch.dict(os.environ, {"PAYPAL_CLIENT_ID": "cid", "PAYPAL_CLIENT_SECRET": "sec",
                                                 "PAYPAL_MODE": "sandbox"})
         self.env.start()
-        for k in ("PREMIUM_MONTHLY_PRICE", "PREMIUM_ANNUAL_PRICE"):
-            os.environ.pop(k, None)
+        os.environ.pop("PREMIUM_MONTHLY_PRICE", None)
         self.paypal = FakePayPal()
         mock.patch.object(payments, "_paypal", self.paypal).start()
         self.emails = []
@@ -106,7 +105,7 @@ class PaymentTests(unittest.TestCase):
         self.assertEqual(cfg["client_id"], "cid")
         self.assertEqual(cfg["mode"], "sandbox")
         self.assertEqual(cfg["plans"]["monthly"]["amount"], "599.00")
-        self.assertEqual(cfg["plans"]["annual"]["amount"], "5388.00")
+        self.assertEqual(list(cfg["plans"]), ["monthly"])   # annual plan removed
         self.assertNotIn("sec", str(cfg))
 
     def test_disabled_without_keys(self):
@@ -147,10 +146,8 @@ class PaymentTests(unittest.TestCase):
         self.assertEqual((p.status, p.capture_id), ("COMPLETED", "CAP-" + oid))
         db.close()
 
-    def test_annual_plan_gives_a_year(self):
-        self.paypal.capture_result = lambda oid: FakeResponse(201, captured(oid, "5388.00"))
-        self.capture(self.order("annual").json()["id"])
-        self.assertAlmostEqual((self.user(self.ana_id).premium_until - datetime.utcnow()).days, 364, delta=1)
+    def test_annual_plan_no_longer_sold(self):
+        self.assertEqual(self.order("annual").status_code, 400)
 
     def test_capture_twice_counts_once(self):
         oid = self.order().json()["id"]

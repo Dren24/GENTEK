@@ -11,9 +11,8 @@ import { PLANS } from '../../data/plans'
 
 // ── PlanCard — renders one Free or Premium plan column ────────────────────────
 // Featured (Premium) uses blue-tinted light bg in light mode, dark bg in dark mode.
-function PlanCard({ plan, annual, onUpgrade }) {
-  // ── Price calculation — apply 25% annual discount to Premium only ─────────
-  const price = plan.price === 0 ? 0 : annual ? plan.annualPrice : plan.price
+function PlanCard({ plan, onUpgrade }) {
+  const price = plan.price
 
   return (
     <div className={`
@@ -51,12 +50,6 @@ function PlanCard({ plan, annual, onUpgrade }) {
               <span className="text-4xl font-extrabold text-gray-900 dark:text-white">₱{price.toLocaleString()}</span>
               <span className="text-gray-500 dark:text-gray-400 text-sm mb-1">/month</span>
             </div>
-            {/* Annual savings note — only visible when annual toggle is on */}
-            {annual && (
-              <p className="text-[11px] text-green-600 dark:text-green-400 font-semibold mb-1">
-                Billed annually — save ₱{((plan.price - plan.annualPrice) * 12).toLocaleString()}/yr
-              </p>
-            )}
           </>
         )}
 
@@ -115,8 +108,7 @@ function PlanCard({ plan, annual, onUpgrade }) {
 // ════════════════════════ PRICING MODAL ══════════════════════════════════════
 export default function PricingModal() {
   const { pricingOpen, closePricing } = useAuth()
-  const [annual, setAnnual]   = useState(false)   // monthly vs annual toggle
-  const [paying, setPaying]   = useState(null)    // { plan, annual } passed to PaymentModal
+  const [paying, setPaying]   = useState(null)    // plan passed to PaymentModal
 
   // ── Hidden when pricingOpen is false ─────────────────────────────────────
   if (!pricingOpen) return null
@@ -146,7 +138,7 @@ export default function PricingModal() {
           <X size={15} weight="bold" />
         </button>
 
-        {/* ── Modal header — title + annual/monthly toggle ─────────────────── */}
+        {/* ── Modal header — title ───────────────────────────────────────────── */}
         <div className="pt-10 pb-6 text-center px-6">
           {/* "Upgrade GENTEK" badge pill */}
           <div className="inline-flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-xs font-bold px-3 py-1 rounded-full mb-3">
@@ -154,33 +146,15 @@ export default function PricingModal() {
             Upgrade GENTEK
           </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">Simple, honest pricing</h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">Start free. Upgrade for unlimited power.</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Start free. Upgrade for unlimited power.</p>
 
-          {/* ── Monthly / Annual billing toggle ──────────────────────────── */}
-          <div className="flex items-center justify-center gap-3">
-            <span className={`text-sm font-medium ${!annual ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>Monthly</span>
-            {/* Toggle switch */}
-            <button
-              onClick={() => setAnnual(o => !o)}
-              className={`relative w-10 h-5 rounded-full transition-colors ${annual ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-700'}`}
-            >
-              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${annual ? 'translate-x-5' : ''}`} />
-            </button>
-            <span className={`text-sm font-medium flex items-center gap-1.5 ${annual ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'}`}>
-              Annual
-              {/* "Save 25%" green badge */}
-              <span className="bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                Save 25%
-              </span>
-            </span>
-          </div>
         </div>
 
         {/* ── Plan cards — Free and Premium side by side ───────────────────── */}
         <div className="px-6 pb-6">
           <div className="grid sm:grid-cols-2 gap-4 items-stretch">
             {PLANS.map(plan => (
-              <PlanCard key={plan.id} plan={plan} annual={annual} onUpgrade={p => setPaying({ plan: p, annual })} />
+              <PlanCard key={plan.id} plan={plan} onUpgrade={setPaying} />
             ))}
           </div>
         </div>
@@ -200,8 +174,7 @@ export default function PricingModal() {
       {/* ── PaymentModal — opens on top of PricingModal when user clicks upgrade ── */}
       {paying && (
         <PaymentModal
-          plan={paying.plan}
-          annual={paying.annual}
+          plan={paying}
           onClose={() => setPaying(null)}
           onUpgraded={() => { setPaying(null); closePricing() }}
         />

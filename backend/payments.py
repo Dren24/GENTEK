@@ -12,7 +12,7 @@
 #   3. Buyer pays in PayPal's window → browser calls
 #      POST /payments/orders/{id}/capture: this server asks PayPal to take the
 #      money, checks PayPal says COMPLETED with the exact amount and currency,
-#      and only THEN turns Premium on (premium_until += 30 or 365 days).
+#      and only THEN turns Premium on (premium_until += 30 days).
 #   So Premium can't be unlocked without a real, verified PayPal payment.
 #
 # Settings (backend/.env locally, Render → Environment in production):
@@ -20,7 +20,6 @@
 #   PAYPAL_MODE            — "sandbox" (test money, default) or "live" (real money).
 #                            Sandbox keys only work with sandbox, live with live.
 #   PREMIUM_MONTHLY_PRICE  — optional, default 599   (e.g. 20 for a cheap live demo)
-#   PREMIUM_ANNUAL_PRICE   — optional, default 5388  (449 × 12)
 
 import os
 import threading
@@ -41,10 +40,10 @@ from models import User, Payment
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 CURRENCY = "PHP"
-PLAN_DAYS = {"monthly": 30, "annual": 365}
-PLAN_LABELS = {"monthly": "Premium — 1 month", "annual": "Premium — 1 year"}
-_DEFAULT_PRICES = {"monthly": "599", "annual": "5388"}
-_PRICE_ENV = {"monthly": "PREMIUM_MONTHLY_PRICE", "annual": "PREMIUM_ANNUAL_PRICE"}
+PLAN_DAYS = {"monthly": 30}          # the only plan: ₱599 for 30 days
+PLAN_LABELS = {"monthly": "Premium — 30 days"}
+_DEFAULT_PRICES = {"monthly": "599"}
+_PRICE_ENV = {"monthly": "PREMIUM_MONTHLY_PRICE"}
 
 
 def _mode() -> str:

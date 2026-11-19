@@ -3,7 +3,7 @@
 // Editing here updates the modal popup AND the /pricing page simultaneously.
 
 // ── PLANS — Free and Premium plan objects ─────────────────────────────────────
-// Each plan has: id, name, price (₱/month), annualPrice (25% off), desc, cta,
+// Each plan has: id, name, price (₱/month), desc, cta,
 // ctaStyle ('ghost' | 'primary'), optional featured/badge, and benefits array.
 // benefits[].note is optional sub-text shown below the benefit label.
 export const PLANS = [
@@ -29,7 +29,6 @@ export const PLANS = [
     id: 'premium',
     name: 'Premium',
     price: 599,
-    annualPrice: 449,               // billed annually (25% saving)
     desc: 'For serious writers, researchers & professionals',
     cta: 'Upgrade to Premium',
     ctaStyle: 'primary',
