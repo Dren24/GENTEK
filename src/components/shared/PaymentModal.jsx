@@ -1,6 +1,6 @@
 // ── PaymentModal — pay for Premium with a card or PayPal ─────────────────────
-// Stacks on top of PricingModal at z-70. Shows PayPal's own buttons
-// ("PayPal" and "Debit or Credit Card"); the card form is PayPal's, inside
+// Stacks on top of PricingModal at z-70. Shows only PayPal's "Debit or
+// Credit Card" button (fundingSource CARD); the card form is PayPal's, inside
 // PayPal's frame, so GENTEK never sees or stores card numbers.
 //
 // Flow (server side is backend/payments.py):
@@ -112,7 +112,8 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
     const fail = (msg) => { lastErrRef.current = msg; throw new Error(msg) }
 
     const buttons = window.paypal.Buttons({
-      style: { layout: 'vertical', shape: 'rect', label: 'pay', height: 44 },
+      fundingSource: window.paypal.FUNDING.CARD,   // card only — no "Pay with PayPal" button
+      style: { layout: 'vertical', shape: 'rect', height: 44 },
 
       createOrder: async () => {
         setError(''); setNotice(''); lastErrRef.current = ''
@@ -156,6 +157,11 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
 
     const el = buttonsRef.current
     el.innerHTML = ''
+    // PayPal decides per buyer/browser whether card payment is offered
+    if (buttons.isEligible && !buttons.isEligible()) {
+      setError("Card payment isn't available in this browser right now. Please try another browser or device.")
+      return
+    }
     buttons.render(el).catch(() => { /* modal closed mid-render */ })
     return () => { try { buttons.close() } catch { /* already gone */ } }
   }, [status, user?.id, billing, done])
@@ -231,7 +237,7 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
 
               {testMode && status === 'ready' && (
                 <p className="mt-3 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
-                  <strong>Test mode</strong> — no real money is charged. Use a PayPal sandbox test card or account.
+                  <strong>Test mode</strong> — no real money is charged. Use a test card from PayPal's sandbox Credit Card Generator.
                 </p>
               )}
 
@@ -261,8 +267,8 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
                   </p>
                 ) : (
                   <div className="relative">
-                    {/* PayPal's buttons sit on white in both themes (their card button is black) */}
-                    <div ref={buttonsRef} className={`rounded-xl bg-white p-3 min-h-[120px] ${busy ? 'opacity-40 pointer-events-none' : ''}`} />
+                    {/* PayPal's card button sits on white in both themes (the button is black) */}
+                    <div ref={buttonsRef} className={`rounded-xl bg-white p-3 min-h-[72px] ${busy ? 'opacity-40 pointer-events-none' : ''}`} />
                     {busy && (
                       <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
                         <SpinnerGap size={16} className="animate-spin" /> Confirming payment…
@@ -275,7 +281,7 @@ export default function PaymentModal({ plan, annual = false, onClose, onUpgraded
               <p className="flex items-start gap-1.5 text-[11px] text-gray-400 dark:text-gray-500 mt-4 leading-relaxed">
                 <LockSimple size={13} className="flex-shrink-0 mt-px" />
                 <span>
-                  Payments are processed by PayPal. GENTEK never sees or stores your card details.
+                  Card payments are processed securely by PayPal. GENTEK never sees or stores your card details.
                   See our <Link to="/terms#payments" onClick={onClose} className="underline hover:text-gray-600 dark:hover:text-gray-300">payment &amp; refund terms</Link>.
                 </span>
               </p>
