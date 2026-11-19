@@ -1,311 +1,69 @@
-// ── PaymentModal — payment form for upgrading to Premium ──────────────────────
-// Stacks on top of PricingModal at z-70. Four payment methods: GCash, Maya,
-// Bank Transfer, Credit/Debit Card. After submit shows SuccessScreen.
-// All payment details are UI-only — no real payment gateway is wired up yet.
+// ── PaymentModal — pay for Premium with a card or PayPal ─────────────────────
+// Stacks on top of PricingModal at z-70. Shows PayPal's own buttons
+// ("PayPal" and "Debit or Credit Card"); the card form is PayPal's, inside
+// PayPal's frame, so GENTEK never sees or stores card numbers.
+//
+// Flow (server side is backend/payments.py):
+//   open → GET /payments/config (public client ID, prices, test/live mode)
+//        → load PayPal's script → render buttons
+//   click → createOrder → POST /payments/orders {plan}  (server sets the price)
+//   paid  → onApprove   → POST /payments/orders/{id}/capture
+//        → server confirms the money with PayPal and turns Premium on
+//        → applyPlan(new plan fields) → SuccessScreen
+// Premium is one-time: 30 days (monthly) or 365 days (annual), no auto-renew.
 
-import { useState } from 'react'
-import {
-  X, CheckCircle, CreditCard, Bank, Copy, ArrowRight,
-  Check, UploadSimple, Warning, SpinnerGap,
-} from '@phosphor-icons/react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { X, CheckCircle, SpinnerGap, Warning, LockSimple, Info } from '@phosphor-icons/react'
 import { useAuth } from '../../context/AuthContext'
 
-// ── Payment method tab definitions ────────────────────────────────────────────
-const METHODS = [
-  { id: 'gcash',    label: 'GCash',          color: '#0070BA' },
-  { id: 'maya',     label: 'Maya',           color: '#38A169' },
-  { id: 'bank',     label: 'Bank Transfer',  color: '#744210' },
-  { id: 'card',     label: 'Card',           color: '#4F46E5' },
-]
-
-// ── Philippine bank options for the Bank Transfer form ────────────────────────
-const BANKS = ['BDO', 'BPI', 'UnionBank', 'Metrobank', 'Security Bank', 'RCBC']
-
-// ── GCashForm — QR/number send instructions for GCash e-wallet ───────────────
-function GCashForm({ amount, name }) {
-  const [copied, setCopied] = useState(false)
-  const number = '0917-123-4567'
-  const copy = () => { navigator.clipboard.writeText(number); setCopied(true); setTimeout(() => setCopied(false), 2000) }
-
-  return (
-    <div className="space-y-4">
-      {/* GCash brand strip */}
-      <div className="flex items-center justify-center h-14 rounded-xl bg-[#0070BA]/10 border border-[#0070BA]/20">
-        <span className="text-2xl font-black text-[#0070BA] tracking-tight">G<span className="text-white">Cash</span></span>
-      </div>
-
-      {/* Amount to send — user must match exactly */}
-      <div className="bg-gray-800 rounded-xl p-4 text-center">
-        <p className="text-xs text-gray-400 mb-1">Send exactly</p>
-        <p className="text-3xl font-extrabold text-white">₱{amount.toLocaleString()}</p>
-        <p className="text-xs text-gray-400 mt-1">for {name} plan</p>
-      </div>
-
-      {/* GCash number with copy-to-clipboard button */}
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">GCash Number</p>
-        <div className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
-          <span className="flex-1 text-white font-mono text-sm">{number}</span>
-          {/* Copy icon — turns into green check on success */}
-          <button onClick={copy} className="text-gray-400 hover:text-white transition-colors">
-            {copied ? <Check size={15} weight="bold" className="text-green-400" /> : <Copy size={15} />}
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-1.5">Account Name: <span className="text-gray-300">GENTEK Inc.</span></p>
-      </div>
-
-      {/* Reference number input — user pastes their GCash ref */}
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Reference / Transaction Number</p>
-        <input
-          placeholder="Paste your GCash reference number"
-          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-[#0070BA] transition-colors"
-        />
-      </div>
-
-      {/* Optional screenshot upload */}
-      <label className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-dashed border-gray-600 hover:border-gray-400 cursor-pointer transition-colors">
-        <UploadSimple size={16} className="text-gray-400" />
-        <span className="text-sm text-gray-400">Upload screenshot (optional)</span>
-      </label>
-
-      {/* Verification time notice */}
-      <p className="flex items-start gap-1.5 text-[11px] text-gray-500">
-        <Warning size={12} className="mt-0.5 flex-shrink-0 text-amber-500" />
-        Your plan activates within 5–15 minutes after verification.
-      </p>
-    </div>
-  )
+// ── loadPayPal — adds PayPal's script once and resolves with window.paypal ────
+let sdkPromise = null
+let sdkUrl = null
+function loadPayPal(clientId, currency) {
+  const url = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}`
+    + `&currency=${currency}&intent=capture&components=buttons&disable-funding=paylater,venmo`
+  if (sdkPromise && sdkUrl === url) return sdkPromise
+  sdkUrl = url
+  sdkPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = url
+    script.async = true
+    script.dataset.namespace = 'paypal'
+    script.onload = () => window.paypal ? resolve(window.paypal) : reject(new Error('PayPal failed to load'))
+    script.onerror = () => { sdkPromise = null; script.remove(); reject(new Error('PayPal failed to load')) }
+    document.head.appendChild(script)
+  })
+  return sdkPromise
 }
 
-// ── MayaForm — same pattern as GCashForm but Maya-branded ─────────────────────
-function MayaForm({ amount, name }) {
-  const [copied, setCopied] = useState(false)
-  const number = '0961-987-6543'
-  const copy = () => { navigator.clipboard.writeText(number); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+const peso = (amount) => `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
-  return (
-    <div className="space-y-4">
-      {/* Maya brand strip */}
-      <div className="flex items-center justify-center h-14 rounded-xl bg-[#38A169]/10 border border-[#38A169]/20">
-        <span className="text-2xl font-black text-[#38A169]">maya</span>
-      </div>
-      <div className="bg-gray-800 rounded-xl p-4 text-center">
-        <p className="text-xs text-gray-400 mb-1">Send exactly</p>
-        <p className="text-3xl font-extrabold text-white">₱{amount.toLocaleString()}</p>
-        <p className="text-xs text-gray-400 mt-1">for {name} plan</p>
-      </div>
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Maya Number</p>
-        <div className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
-          <span className="flex-1 text-white font-mono text-sm">{number}</span>
-          <button onClick={copy} className="text-gray-400 hover:text-white transition-colors">
-            {copied ? <Check size={15} weight="bold" className="text-green-400" /> : <Copy size={15} />}
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-1.5">Account Name: <span className="text-gray-300">GENTEK Inc.</span></p>
-      </div>
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Reference / Transaction Number</p>
-        <input
-          placeholder="Paste your Maya reference number"
-          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-[#38A169] transition-colors"
-        />
-      </div>
-      <label className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-dashed border-gray-600 hover:border-gray-400 cursor-pointer transition-colors">
-        <UploadSimple size={16} className="text-gray-400" />
-        <span className="text-sm text-gray-400">Upload screenshot (optional)</span>
-      </label>
-      <p className="flex items-start gap-1.5 text-[11px] text-gray-500">
-        <Warning size={12} className="mt-0.5 flex-shrink-0 text-amber-500" />
-        Your plan activates within 5–15 minutes after verification.
-      </p>
-    </div>
-  )
+function formatDate(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-// ── BankForm — PH bank transfer with selectable bank and account details ───────
-function BankForm({ amount, name }) {
-  const [bank, setBank] = useState('BDO')
-  // Static account details per bank — update when live accounts are assigned
-  const details = {
-    BDO:           { account: '006-780-123456', type: 'Savings' },
-    BPI:           { account: '1234-5678-90',   type: 'Savings' },
-    UnionBank:     { account: '0123-4567-8901', type: 'Checking' },
-    Metrobank:     { account: '012-3-45678901-2', type: 'Savings' },
-    'Security Bank':{ account: '0000-1234-5678', type: 'Savings' },
-    RCBC:          { account: '1234-5678-9012',  type: 'Savings' },
-  }
-  const [copied, setCopied] = useState(false)
-  const copy = () => { navigator.clipboard.writeText(details[bank].account); setCopied(true); setTimeout(() => setCopied(false), 2000) }
-
+// ── SuccessScreen — shown after the server confirmed the payment ──────────────
+function SuccessScreen({ premiumUntil, testMode, onDone }) {
   return (
-    <div className="space-y-4">
-      {/* Bank transfer brand strip */}
-      <div className="flex items-center justify-center h-14 rounded-xl bg-amber-900/20 border border-amber-800/30">
-        <Bank size={22} className="text-amber-400 mr-2" />
-        <span className="text-base font-bold text-amber-300">Bank Transfer</span>
-      </div>
-
-      {/* Bank selector grid — 3 columns */}
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Select your bank</p>
-        <div className="grid grid-cols-3 gap-1.5">
-          {BANKS.map(b => (
-            <button
-              key={b}
-              onClick={() => setBank(b)}
-              className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all border ${
-                bank === b
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
-              }`}
-            >
-              {b}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Account details table — updates when bank selection changes */}
-      <div className="bg-gray-800 rounded-xl p-4 space-y-2.5">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-400">Account Name</span>
-          <span className="text-white font-medium">GENTEK Inc.</span>
-        </div>
-        <div className="flex justify-between text-sm items-center">
-          <span className="text-gray-400">Account Number</span>
-          <div className="flex items-center gap-2">
-            <span className="text-white font-mono font-medium">{details[bank].account}</span>
-            {/* Copy account number button */}
-            <button onClick={copy} className="text-gray-400 hover:text-white">
-              {copied ? <Check size={13} weight="bold" className="text-green-400" /> : <Copy size={13} />}
-            </button>
-          </div>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-400">Account Type</span>
-          <span className="text-white font-medium">{details[bank].type}</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-400">Amount</span>
-          <span className="text-white font-bold">₱{amount.toLocaleString()}</span>
-        </div>
-      </div>
-
-      {/* Reference / trace number input */}
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Reference / Trace Number</p>
-        <input
-          placeholder="Enter bank reference number"
-          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-blue-500 transition-colors"
-        />
-      </div>
-      {/* Optional deposit slip upload */}
-      <label className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-dashed border-gray-600 hover:border-gray-400 cursor-pointer transition-colors">
-        <UploadSimple size={16} className="text-gray-400" />
-        <span className="text-sm text-gray-400">Upload deposit slip (optional)</span>
-      </label>
-      <p className="flex items-start gap-1.5 text-[11px] text-gray-500">
-        <Warning size={12} className="mt-0.5 flex-shrink-0 text-amber-500" />
-        Bank transfers may take 1–24 hours to verify on banking days.
-      </p>
-    </div>
-  )
-}
-
-// ── CardForm — credit/debit card entry with 16-digit number formatting ─────────
-function CardForm() {
-  const [num, setNum] = useState('')
-  // Format raw digits as groups of 4 (e.g. "1234 5678 9012 3456")
-  const fmt = v => v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
-  return (
-    <div className="space-y-4">
-      {/* Card brand strip */}
-      <div className="flex items-center justify-center h-14 rounded-xl bg-indigo-900/20 border border-indigo-800/30">
-        <CreditCard size={22} className="text-indigo-400 mr-2" />
-        <span className="text-base font-bold text-indigo-300">Credit / Debit Card</span>
-      </div>
-      {/* Card number field with auto-space formatting */}
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Card Number</p>
-        <input
-          value={num}
-          onChange={e => setNum(fmt(e.target.value))}
-          placeholder="0000 0000 0000 0000"
-          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 transition-colors font-mono tracking-widest"
-        />
-      </div>
-      {/* Cardholder name — uppercase mirror of physical card */}
-      <div>
-        <p className="text-xs text-gray-400 mb-1.5">Cardholder Name</p>
-        <input
-          placeholder="Name as printed on card"
-          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 transition-colors uppercase"
-        />
-      </div>
-      {/* Expiry + CVV side by side */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <p className="text-xs text-gray-400 mb-1.5">Expiry Date</p>
-          <input
-            placeholder="MM / YY"
-            maxLength={7}
-            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 transition-colors"
-          />
-        </div>
-        <div>
-          <p className="text-xs text-gray-400 mb-1.5">CVV</p>
-          {/* Password type hides CVV digits visually */}
-          <input
-            placeholder="•••"
-            maxLength={4}
-            type="password"
-            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 transition-colors"
-          />
-        </div>
-      </div>
-      {/* SSL security notice */}
-      <div className="flex items-center gap-2 text-[11px] text-gray-500 bg-gray-800/60 rounded-xl px-3 py-2.5">
-        <span className="text-green-400">🔒</span>
-        Secured by 256-bit SSL encryption. We never store your card details.
-      </div>
-    </div>
-  )
-}
-
-// ── SuccessScreen — shown after user submits payment; replaces form ─────────────
-// onDone closes the whole modal stack (Payment + Pricing) so the user lands
-// back in the app and immediately sees their new Premium status.
-function SuccessScreen({ plan, onDone }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-8 text-center space-y-4">
-      {/* Green checkmark with confetti emoji overlay */}
-      <div className="relative">
-        <div className="w-20 h-20 rounded-full bg-green-900/30 border-2 border-green-500 flex items-center justify-center">
-          <CheckCircle size={40} weight="fill" className="text-green-400" />
-        </div>
-        <div className="absolute -top-1 -right-1 text-xl">🎉</div>
+    <div className="flex flex-col items-center justify-center py-6 text-center space-y-4">
+      <div className="w-20 h-20 rounded-full bg-green-50 dark:bg-green-900/30 border-2 border-green-500 flex items-center justify-center">
+        <CheckCircle size={40} weight="fill" className="text-green-500 dark:text-green-400" />
       </div>
       <div>
-        <h3 className="text-xl font-bold text-white mb-1">You're Premium!</h3>
-        <p className="text-gray-400 text-sm max-w-xs">
-          Your <span className="text-white font-semibold">{plan}</span> plan is active — unlimited analyses, advanced detection, and full history are unlocked now.
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">You're Premium!</h3>
+        <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs">
+          Payment received{testMode ? ' (test mode — no real money)' : ''}. Unlimited analyses, advanced detection and full history are unlocked now.
         </p>
       </div>
-      {/* Status summary table */}
-      <div className="w-full bg-gray-800 rounded-xl p-4 text-left space-y-2">
-        {[
-          { label: 'Status',    val: 'Active',                   color: 'text-green-400' },
-          { label: 'Plan',      val: plan,                       color: 'text-white'     },
-        ].map(r => (
-          <div key={r.label} className="flex justify-between text-sm">
-            <span className="text-gray-500">{r.label}</span>
-            <span className={`font-medium ${r.color}`}>{r.val}</span>
-          </div>
-        ))}
+      <div className="w-full bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-left space-y-2 text-sm">
+        <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="font-medium text-green-600 dark:text-green-400">Active</span></div>
+        {premiumUntil && (
+          <div className="flex justify-between"><span className="text-gray-500">Premium until</span><span className="font-medium text-gray-900 dark:text-white">{formatDate(premiumUntil)}</span></div>
+        )}
       </div>
-      {/* Back to GENTEK — closes the whole modal stack, revealing the now-Premium UI */}
+      <p className="text-xs text-gray-400 dark:text-gray-500">A receipt was sent to your email.</p>
       <button
         onClick={onDone}
         className="w-full py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition-colors"
@@ -317,111 +75,210 @@ function SuccessScreen({ plan, onDone }) {
 }
 
 // ════════════════════════ PAYMENT MODAL ══════════════════════════════════════
-export default function PaymentModal({ plan, onClose, onUpgraded }) {
-  const { upgradeToPremium } = useAuth()
-  const [method, setMethod]       = useState('gcash')   // active payment method tab
-  const [success, setSuccess]     = useState(false)     // true after submit → show SuccessScreen
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]         = useState('')
+export default function PaymentModal({ plan, annual = false, onClose, onUpgraded }) {
+  const { user, authHeader, applyPlan, logout } = useAuth()
+  const [billing, setBilling] = useState(annual ? 'annual' : 'monthly')
+  const [config, setConfig]   = useState(null)       // /payments/config response
+  const [status, setStatus]   = useState('loading')  // loading | ready | unavailable
+  const [busy, setBusy]       = useState(false)      // capturing the payment
+  const [error, setError]     = useState('')
+  const [notice, setNotice]   = useState('')
+  const [done, setDone]       = useState(null)       // plan fields after success
+
+  const buttonsRef = useRef(null)
+  // PayPal keeps the callbacks it was rendered with — read live values via refs
+  const billingRef = useRef(billing); billingRef.current = billing
+  const headerRef  = useRef(authHeader); headerRef.current = authHeader
+  const lastErrRef = useRef('')
+
+  // ── Load prices + client ID, then PayPal's script ───────────────────────────
+  useEffect(() => {
+    let alive = true
+    fetch('/payments/config')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(cfg => {
+        if (!alive) return
+        setConfig(cfg)
+        if (!cfg.enabled) { setStatus('unavailable'); return }
+        return loadPayPal(cfg.client_id, cfg.currency).then(() => alive && setStatus('ready'))
+      })
+      .catch(() => alive && setStatus('unavailable'))
+    return () => { alive = false }
+  }, [])
+
+  // ── Render PayPal's buttons (again when the billing period changes) ────────
+  useEffect(() => {
+    if (status !== 'ready' || !user || done || !buttonsRef.current || !window.paypal) return
+    const fail = (msg) => { lastErrRef.current = msg; throw new Error(msg) }
+
+    const buttons = window.paypal.Buttons({
+      style: { layout: 'vertical', shape: 'rect', label: 'pay', height: 44 },
+
+      createOrder: async () => {
+        setError(''); setNotice(''); lastErrRef.current = ''
+        const res = await fetch('/payments/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headerRef.current() },
+          body: JSON.stringify({ plan: billingRef.current }),
+        })
+        if (res.status === 401) { logout(); fail('Your session expired. Please log in again.') }
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) fail(data.detail || "Couldn't start the payment. Please try again.")
+        return data.id
+      },
+
+      onApprove: async (data, actions) => {
+        setBusy(true)
+        try {
+          const res = await fetch(`/payments/orders/${encodeURIComponent(data.orderID)}/capture`, {
+            method: 'POST',
+            headers: headerRef.current(),
+          })
+          const body = await res.json().catch(() => ({}))
+          // Card declined → reopen PayPal's window so the buyer can use another card
+          if (res.status === 402 && body.detail === 'INSTRUMENT_DECLINED') {
+            setNotice('That card was declined. Please try another card or payment method.')
+            return actions.restart()
+          }
+          if (!res.ok) { setError(body.detail || "The payment couldn't be confirmed. Please contact us."); return }
+          applyPlan(body)
+          setDone(body)
+        } catch {
+          setError("We couldn't confirm the payment because the connection dropped. If you were charged, refresh the page — Premium turns on once PayPal confirms it.")
+        } finally {
+          setBusy(false)
+        }
+      },
+
+      onCancel: () => setNotice("Payment cancelled — you weren't charged."),
+      onError: () => setError(lastErrRef.current || 'PayPal ran into a problem. Please try again.'),
+    })
+
+    const el = buttonsRef.current
+    el.innerHTML = ''
+    buttons.render(el).catch(() => { /* modal closed mid-render */ })
+    return () => { try { buttons.close() } catch { /* already gone */ } }
+  }, [status, user?.id, billing, done])
+
+  // ── Close on Escape ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose?.() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])
 
   if (!plan) return null
 
-  // Active method's brand color — applied to Submit button background
-  const methodColor = METHODS.find(m => m.id === method)?.color || '#3B82F6'
-
-  // ── handleSubmit — activates Premium on the account, then shows success ────
-  const handleSubmit = async () => {
-    setSubmitting(true)
-    setError('')
-    try {
-      await upgradeToPremium()
-      setSuccess(true)
-    } catch (err) {
-      setError(err.message || 'Something went wrong — please try again.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
+  const planInfo = config?.plans?.[billing]
+  const amount = planInfo?.amount ?? (billing === 'annual' ? plan.annualPrice * 12 : plan.price)
+  const testMode = config?.mode === 'sandbox'
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
-      {/* Backdrop — click to close */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4 py-6">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !busy && onClose?.()} />
 
-      {/* ── Modal panel — dark background (#0d1117 = GitHub-dark) ──────────── */}
       <div
-        className="relative w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl"
-        style={{ background: '#0d1117', animation: 'slideUp 0.25s cubic-bezier(0.16,1,0.3,1)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="payment-title"
+        className="relative w-full max-w-sm max-h-full flex flex-col rounded-2xl overflow-hidden shadow-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800"
+        style={{ animation: 'slideUp 0.25s cubic-bezier(0.16,1,0.3,1)' }}
       >
-        {/* Close X button — top-right corner */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 w-7 h-7 rounded-full bg-gray-800 hover:bg-gray-700 flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+          disabled={busy}
+          aria-label="Close"
+          className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 transition-colors disabled:opacity-50"
         >
-          <X size={13} weight="bold" />
+          <X size={14} weight="bold" />
         </button>
 
-        <div className="p-6 max-h-[90vh] overflow-y-auto">
-          {success ? (
-            // ── Success screen replaces form after submit ──────────────────
-            <SuccessScreen plan={plan.name} onDone={onUpgraded || onClose} />
+        <div className="p-6 overflow-y-auto overscroll-contain">
+          {done ? (
+            <SuccessScreen premiumUntil={done.premium_until} testMode={testMode} onDone={onUpgraded || onClose} />
           ) : (
             <>
-              {/* ── Header — plan name + price ───────────────────────────── */}
-              <div className="mb-5">
-                <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Upgrade to</p>
-                <h2 className="text-xl font-bold text-white">{plan.name} Plan</h2>
-                <p className="text-2xl font-extrabold text-white mt-0.5">
-                  ₱{plan.price.toLocaleString()}
-                  <span className="text-sm font-normal text-gray-400 ml-1">{plan.period ?? '/month'}</span>
+              {/* ── Header — plan + price ───────────────────────────────────── */}
+              <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Upgrade to</p>
+              <h2 id="payment-title" className="text-xl font-bold text-gray-900 dark:text-white pr-10">{plan.name}</h2>
+              <p className="text-3xl font-extrabold text-gray-900 dark:text-white mt-1">
+                {peso(amount)}
+                <span className="text-sm font-normal text-gray-400 ml-1">{billing === 'annual' ? 'for 1 year' : 'for 1 month'}</span>
+              </p>
+
+              {/* ── Monthly / Annual ────────────────────────────────────────── */}
+              <div className="grid grid-cols-2 gap-1 p-1 mt-4 rounded-xl bg-gray-100 dark:bg-gray-800" role="radiogroup" aria-label="Billing period">
+                {['monthly', 'annual'].map(b => (
+                  <button
+                    key={b}
+                    role="radio"
+                    aria-checked={billing === b}
+                    disabled={busy}
+                    onClick={() => setBilling(b)}
+                    className={`py-2 rounded-lg text-xs font-semibold transition-colors ${billing === b
+                      ? 'bg-white dark:bg-gray-950 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                  >
+                    {b === 'monthly' ? '1 month' : '1 year · save 25%'}
+                  </button>
+                ))}
+              </div>
+
+              <p className="flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-3">
+                <Info size={14} className="flex-shrink-0 mt-px" />
+                One-time payment. Premium lasts {billing === 'annual' ? '365' : '30'} days and does not renew automatically.
+              </p>
+
+              {testMode && status === 'ready' && (
+                <p className="mt-3 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+                  <strong>Test mode</strong> — no real money is charged. Use a PayPal sandbox test card or account.
                 </p>
-              </div>
-
-              {/* ── Payment method tabs — GCash / Maya / Bank / Card ─────── */}
-              <div className="mb-5">
-                <p className="text-xs text-gray-400 mb-2">Payment method</p>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {METHODS.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => setMethod(m.id)}
-                      className={`py-2 px-1 rounded-xl text-[11px] font-semibold transition-all border ${
-                        method === m.id
-                          ? 'text-white border-transparent'
-                          : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
-                      }`}
-                      style={method === m.id ? { background: m.color, borderColor: m.color } : {}}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* ── Active payment form — swaps based on selected method ─── */}
-              <div className="mb-5">
-                {method === 'gcash' && <GCashForm amount={plan.price} name={plan.name} />}
-                {method === 'maya'  && <MayaForm  amount={plan.price} name={plan.name} />}
-                {method === 'bank'  && <BankForm  amount={plan.price} name={plan.name} />}
-                {method === 'card'  && <CardForm />}
-              </div>
-
-              {/* Error banner — shown if activating Premium failed */}
-              {error && (
-                <p className="text-xs text-rose-400 bg-rose-900/20 border border-rose-800 rounded-xl px-3 py-2 text-center mb-3">{error}</p>
               )}
 
-              {/* ── Submit button — color matches active payment method ───── */}
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="w-full py-3 rounded-xl text-white font-bold text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{ background: methodColor }}
-              >
-                {submitting
-                  ? <><SpinnerGap size={15} className="animate-spin" />Processing…</>
-                  : <>{method === 'card' ? 'Pay Now' : 'Submit Payment'}<ArrowRight size={15} weight="bold" /></>}
-              </button>
+              {/* ── Messages ────────────────────────────────────────────────── */}
+              {error && (
+                <p role="alert" className="mt-3 flex items-start gap-1.5 text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2">
+                  <Warning size={14} className="flex-shrink-0 mt-px" />{error}
+                </p>
+              )}
+              {notice && !error && (
+                <p role="status" className="mt-3 text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2">{notice}</p>
+              )}
+
+              {/* ── Payment buttons ─────────────────────────────────────────── */}
+              <div className="mt-4">
+                {!user ? (
+                  <p className="text-sm text-center text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-5">
+                    Please log in or create an account first, so Premium can be added to it.
+                  </p>
+                ) : status === 'loading' ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500 dark:text-gray-400">
+                    <SpinnerGap size={16} className="animate-spin" /> Loading secure checkout…
+                  </div>
+                ) : status === 'unavailable' ? (
+                  <p className="text-sm text-center text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-5">
+                    Payments aren't available right now. Please try again later.
+                  </p>
+                ) : (
+                  <div className="relative">
+                    {/* PayPal's buttons sit on white in both themes (their card button is black) */}
+                    <div ref={buttonsRef} className={`rounded-xl bg-white p-3 min-h-[120px] ${busy ? 'opacity-40 pointer-events-none' : ''}`} />
+                    {busy && (
+                      <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+                        <SpinnerGap size={16} className="animate-spin" /> Confirming payment…
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <p className="flex items-start gap-1.5 text-[11px] text-gray-400 dark:text-gray-500 mt-4 leading-relaxed">
+                <LockSimple size={13} className="flex-shrink-0 mt-px" />
+                <span>
+                  Payments are processed by PayPal. GENTEK never sees or stores your card details.
+                  See our <Link to="/terms#payments" onClick={onClose} className="underline hover:text-gray-600 dark:hover:text-gray-300">payment &amp; refund terms</Link>.
+                </span>
+              </p>
             </>
           )}
         </div>

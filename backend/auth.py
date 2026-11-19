@@ -22,7 +22,7 @@
 #                    → reset token → POST /reset-password → new password + logged in
 #   Create pw ...... POST /create-password (Google-only accounts)
 #   History ........ GET/POST/PUT/DELETE /history/... (saved analyses, sidebar)
-#   Account ........ PUT /update, /change-password, /notifications, /upgrade; DELETE /delete
+#   Account ........ PUT /update, /change-password, /notifications; DELETE /delete
 #   Contact form ... POST /contact → email to GENTEK's inbox
 #   Email sending .. _send_email → Brevo API (on Render) or Gmail SMTP (local)
 
@@ -52,7 +52,7 @@ from html import escape
 load_dotenv()
 
 from database import get_db
-from models import User, Analysis, PasswordResetToken, EmailCode, TrustedDevice
+from models import User, Analysis, PasswordResetToken, EmailCode, TrustedDevice, Payment
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -254,12 +254,22 @@ def _rate_limit(kind: str, value: str):
         raise HTTPException(status_code=429, detail=f"Too many attempts. Please try again in {max(1, round(wait / 60))} minute(s).")
 
 
+def premium_fields(user: User) -> dict:
+    """Plan fields sent to the browser: whether Premium is on right now and,
+    if it was paid for, when it ends (ISO UTC, or None)."""
+    active = user.premium_active
+    return {
+        "is_premium": active,
+        "premium_until": user.premium_until.isoformat() + "Z" if active and user.premium_until else None,
+    }
+
+
 def _user_payload(user: User, db: Session, remember: bool, new_device: bool = False) -> dict:
     """The normal logged-in response. With new_device, also trusts this browser
     for TRUSTED_DEVICE_DAYS and returns the token it should keep."""
     payload = {
         "id": user.id, "name": user.name, "email": user.email,
-        "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium),
+        "email_notifications": bool(user.email_notifications), **premium_fields(user),
         "has_password": bool(user.has_password),
         "token": _create_token(user.id, user.name, user.email, remember=remember),
     }
@@ -605,26 +615,12 @@ def update_user(user_id: int, req: UpdateNameRequest, db: Session = Depends(get_
     user.name = req.name
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium)}
+    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), **premium_fields(user)}
 
 
-# ── PUT /auth/upgrade/{user_id} — activate Premium on the account ────────────
-# GENTEK has no real payment gateway integration — this marks the account
-# Premium once the (currently UI-only) payment form is submitted. The backend
-# is still the source of truth: is_premium is persisted here, not just set in
-# frontend state, so it survives refresh/re-login and every other endpoint
-# that reads is_premium (word limits, plan badges) picks it up immediately.
-@router.put("/upgrade/{user_id}")
-def upgrade_to_premium(user_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    if current_user["id"] != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user.is_premium = 1
-    db.commit()
-    db.refresh(user)
-    return {"id": user.id, "name": user.name, "email": user.email, "email_notifications": bool(user.email_notifications), "is_premium": bool(user.is_premium)}
+# (Premium is activated only by a verified PayPal payment — see payments.py.
+# The old PUT /auth/upgrade route, which turned Premium on without any
+# payment, was removed.)
 
 
 # ── PUT /auth/change-password/{user_id} — verify current pw then update ──────
@@ -730,7 +726,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: dict 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    for model in (EmailCode, TrustedDevice, PasswordResetToken):
+    for model in (EmailCode, TrustedDevice, PasswordResetToken, Payment):
         db.query(model).filter(model.user_id == user_id).delete()
     db.delete(user)
     db.commit()

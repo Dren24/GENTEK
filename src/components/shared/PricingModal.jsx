@@ -116,7 +116,7 @@ function PlanCard({ plan, annual, onUpgrade }) {
 export default function PricingModal() {
   const { pricingOpen, closePricing } = useAuth()
   const [annual, setAnnual]   = useState(false)   // monthly vs annual toggle
-  const [paying, setPaying]   = useState(null)    // plan object passed to PaymentModal
+  const [paying, setPaying]   = useState(null)    // { plan, annual } passed to PaymentModal
 
   // ── Hidden when pricingOpen is false ─────────────────────────────────────
   if (!pricingOpen) return null
@@ -180,7 +180,7 @@ export default function PricingModal() {
         <div className="px-6 pb-6">
           <div className="grid sm:grid-cols-2 gap-4 items-stretch">
             {PLANS.map(plan => (
-              <PlanCard key={plan.id} plan={plan} annual={annual} onUpgrade={setPaying} />
+              <PlanCard key={plan.id} plan={plan} annual={annual} onUpgrade={p => setPaying({ plan: p, annual })} />
             ))}
           </div>
         </div>
@@ -200,7 +200,8 @@ export default function PricingModal() {
       {/* ── PaymentModal — opens on top of PricingModal when user clicks upgrade ── */}
       {paying && (
         <PaymentModal
-          plan={paying}
+          plan={paying.plan}
+          annual={paying.annual}
           onClose={() => setPaying(null)}
           onUpgraded={() => { setPaying(null); closePricing() }}
         />

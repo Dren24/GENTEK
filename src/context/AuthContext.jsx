@@ -360,17 +360,29 @@ export function AuthProvider({ children }) {
     }).catch(() => {})
   }
 
-  // ── upgradeToPremium — PUT /auth/upgrade/{id}, called when the checkout
-  // flow (PaymentModal) completes; grants Premium immediately — see
-  // backend/auth.py for why there's no real payment gateway behind this. ────
-  const upgradeToPremium = async () => {
-    if (!user?.id) return
-    const res = await authFetch(`/auth/upgrade/${user.id}`, { method: 'PUT' })
-    if (!res.ok) throw new Error('Could not activate Premium')
-    const updated = { ...user, is_premium: true }
-    setUser(updated)
-    ;(rememberMe ? localStorage : sessionStorage).setItem('gentek-user', JSON.stringify(updated))
+  // ── applyPlan — store new plan fields ({is_premium, premium_until}) from the
+  // server, e.g. after a verified PayPal payment (PaymentModal). Premium is
+  // only ever turned on by the server — see backend/payments.py. ─────────────
+  const applyPlan = (fields) => {
+    setUser(prev => {
+      if (!prev) return prev
+      const updated = { ...prev, is_premium: !!fields.is_premium, premium_until: fields.premium_until ?? null }
+      ;(rememberMe ? localStorage : sessionStorage).setItem('gentek-user', JSON.stringify(updated))
+      return updated
+    })
   }
+
+  // ── Refresh the plan on load — Premium ends by itself when its paid period
+  // runs out, and the profile saved in this browser may be older than that. ──
+  useEffect(() => {
+    if (!user?.id) return
+    authFetch('/payments/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && (data.is_premium !== !!user.is_premium || (data.premium_until ?? null) !== (user.premium_until ?? null))) applyPlan(data)
+      })
+      .catch(() => {})
+  }, [user?.id])
 
   // ── deleteAccount — permanently remove account from DB then log out ─────────
   const deleteAccount = async () => {
@@ -389,7 +401,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, resetPassword, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, upgradeToPremium, deleteAccount,
+      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, resetPassword, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, applyPlan, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,

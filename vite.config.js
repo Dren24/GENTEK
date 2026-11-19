@@ -14,6 +14,7 @@ export default defineConfig({
       '/analyze': 'http://localhost:8000',
       '/health':  'http://localhost:8000',
       '/auth':    { target: 'http://localhost:8000', changeOrigin: true },
+      '/payments': { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
 })

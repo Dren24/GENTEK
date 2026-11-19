@@ -19,6 +19,9 @@ class User(Base):
     password             = Column(String(255), nullable=False)
     email_notifications  = Column(Integer, default=1, server_default='1', nullable=False)
     is_premium           = Column(Integer, default=0, server_default='0', nullable=False)  # 0 = Free plan, 1 = Premium/Pro
+    # When paid Premium ends (UTC). NULL with is_premium=1 = no end date (the
+    # local dev test account, or accounts upgraded before payments existed).
+    premium_until        = Column(DateTime, nullable=True)
     google_id            = Column(String(255), unique=True, nullable=True, index=True)  # Google 'sub' claim, if linked
     # 1 once the owner proved the address (emailed code or Google). Defaults to
     # 1 so accounts created before verification existed aren't locked out;
@@ -32,6 +35,15 @@ class User(Base):
 
     # ── Relationship: one user → many analyses (cascade delete) ───────────────
     analyses = relationship("Analysis", back_populates="user", cascade="all, delete")
+
+    # ── premium_active — the ONE place that decides if Premium is on right now.
+    # Read this instead of is_premium, so Premium switches off by itself when
+    # the paid period runs out. ───────────────────────────────────────────────
+    @property
+    def premium_active(self) -> bool:
+        if not self.is_premium:
+            return False
+        return self.premium_until is None or self.premium_until > datetime.utcnow()
 
 
 # ── Analysis table ────────────────────────────────────────────────────────────
@@ -94,3 +106,24 @@ class TrustedDevice(Base):
     token_hash = Column(String(64), unique=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# ── Payment table ─────────────────────────────────────────────────────────────
+# One row per PayPal checkout (see backend/payments.py). Created when the
+# order is made, marked COMPLETED only after GENTEK's server captured it with
+# PayPal and checked the amount. Deleted with the account (DELETE /auth/delete);
+# PayPal keeps its own record of every transaction.
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    order_id     = Column(String(64), unique=True, nullable=False, index=True)  # PayPal order ID
+    capture_id   = Column(String(64), nullable=True)      # PayPal transaction ID once paid
+    plan         = Column(String(20), nullable=False)     # 'monthly' | 'annual'
+    amount       = Column(String(20), nullable=False)     # e.g. '599.00' (string = exact)
+    currency     = Column(String(3), nullable=False)
+    mode         = Column(String(10), nullable=False)     # 'sandbox' (test) | 'live' (real money)
+    status       = Column(String(20), nullable=False, default="CREATED")  # CREATED | COMPLETED | PENDING | FAILED
+    created_at   = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)

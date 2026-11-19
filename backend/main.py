@@ -17,6 +17,7 @@ from database import engine, Base, get_db, SessionLocal
 from models import User
 from analyzer import analyze
 import auth
+import payments
 
 # ── Create DB tables on startup (no-op if they already exist) ─────────────────
 Base.metadata.create_all(bind=engine)
@@ -29,6 +30,7 @@ with engine.connect() as _conn:
         "ALTER TABLE users ADD COLUMN google_id VARCHAR(255)",
         "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE users ADD COLUMN has_password INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN premium_until TIMESTAMP",
         "ALTER TABLE password_reset_tokens ADD COLUMN id INTEGER",  # no-op guard
     ]:
         try:
@@ -74,6 +76,9 @@ app.add_middleware(
 # ── Auth router — /auth/register, /auth/login, /auth/history/... ──────────────
 app.include_router(auth.router)
 
+# ── Payments router — /payments/config, /payments/orders (PayPal checkout) ────
+app.include_router(payments.router)
+
 
 # ── Analyze request schema ────────────────────────────────────────────────────
 class AnalyzeRequest(BaseModel):
@@ -118,7 +123,7 @@ def analyze_text(
     is_premium = False
     if current_user:
         user = db.query(User).filter(User.id == current_user["id"]).first()
-        is_premium = bool(user.is_premium) if user else False
+        is_premium = user.premium_active if user else False
 
     text_to_analyze = req.text
     if not is_premium:

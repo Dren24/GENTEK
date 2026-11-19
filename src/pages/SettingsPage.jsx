@@ -8,6 +8,7 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import {
   User, EnvelopeSimple, Moon, Sun, SignOut, Trash,
   Lock, Bell, ShieldCheck, FloppyDisk, Warning, X, Eye, EyeSlash, CheckCircle,
+  Lightning,
 } from '@phosphor-icons/react'
 import { useAuth } from '../context/AuthContext'
 import { useDarkMode } from '../hooks/useDarkMode'
@@ -333,7 +334,7 @@ function Row({ icon: Icon, label, desc, children }) {
 
 // ════════════════════════ SETTINGS PAGE ══════════════════════════════════════
 export default function SettingsPage() {
-  const { user, logout, updateUser, updateNotifications, deleteAccount } = useAuth()
+  const { user, logout, updateUser, updateNotifications, deleteAccount, openPricing } = useAuth()
   const [dark, setDark]  = useDarkMode()
   const navigate         = useNavigate()
 
@@ -474,6 +475,23 @@ export default function SettingsPage() {
 
           {/* ── Account section — sign out + delete account ───────────────── */}
           <Section title="Account">
+            {/* Plan — Premium end date, or an upgrade button (payments: backend/payments.py) */}
+            <Row
+              icon={Lightning}
+              label={user.is_premium ? 'Premium' : 'Free plan'}
+              desc={user.is_premium
+                ? (user.premium_until
+                    ? `Active until ${new Date(user.premium_until).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} · doesn't renew automatically`
+                    : 'Active')
+                : 'Upgrade for unlimited analyses and words'}
+            >
+              <button
+                onClick={openPricing}
+                className="text-xs font-semibold text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800 hover:border-brand-300 dark:hover:border-brand-700 px-3 py-1.5 rounded-xl transition-colors"
+              >
+                {user.is_premium ? 'Extend' : 'Upgrade'}
+              </button>
+            </Row>
             {/* Sign Out — triggers logout() and navigates home */}
             <Row icon={SignOut} label="Sign Out" desc="Sign out of your GENTEK account">
               <button

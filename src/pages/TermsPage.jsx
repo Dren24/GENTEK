@@ -1,7 +1,8 @@
 // ── TermsPage — static Terms of Service page (/terms) ─────────────────────────
 // Linked from the footer, the sign-up modal, and Google's sign-in consent screen.
 
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 
 const SECTIONS = [
   {
@@ -41,16 +42,27 @@ const SECTIONS = [
     body: `We reserve the right to terminate or suspend your account at any time, with or without notice, for conduct that we determine to be in violation of these Terms or harmful to other users, us, or third parties. You may delete your account at any time through the Settings page.`,
   },
   {
-    title: '10. Governing Law',
+    id: 'payments',
+    title: '10. Payments, Premium & Refunds',
+    body: `Premium is a one-time payment: ₱599 for 30 days or ₱5,388 for 365 days (prices may change; the price shown at checkout is the one you pay). Premium does not renew automatically, so there is no subscription to cancel — when the period ends, your account returns to the Free plan and your history is kept. Payments are processed by PayPal (card or PayPal balance); GENTEK never sees or stores your card details, and PayPal and GENTEK each email you a receipt. If you were charged by mistake, charged twice, or Premium did not turn on, contact us within 7 days through the Contact page with your PayPal transaction ID and we will fix it or refund you in full. Other refund requests are reviewed case by case.`,
+  },
+  {
+    title: '11. Governing Law',
     body: `These Terms shall be governed by and construed in accordance with applicable laws. Any disputes arising from these Terms or your use of the Service shall be resolved through good-faith negotiation, and if necessary, binding arbitration in the jurisdiction where GENTEK operates.`,
   },
   {
-    title: '11. Contact',
+    title: '12. Contact',
     body: `If you have any questions about these Terms of Service, please contact us through the Contact page. We aim to respond within 2–3 business days.`,
   },
 ]
 
 export default function TermsPage() {
+  // Jump to a section when linked with a #hash (e.g. /terms#payments from checkout)
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' })
+  }, [hash])
+
   return (
     <main className="pt-16 bg-white dark:bg-gray-950 min-h-screen">
 
@@ -60,7 +72,7 @@ export default function TermsPage() {
           <p className="section-label mb-3">Legal</p>
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Terms of Service</h1>
           <p className="text-gray-500 dark:text-gray-400 text-base leading-relaxed">
-            Last updated: July 3, 2026. Please read these terms carefully before using GENTEK.
+            Last updated: November 20, 2026. Please read these terms carefully before using GENTEK.
           </p>
         </div>
       </section>
@@ -69,7 +81,7 @@ export default function TermsPage() {
       <section className="py-14">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 space-y-10">
           {SECTIONS.map((s) => (
-            <div key={s.title}>
+            <div key={s.title} id={s.id} className="scroll-mt-24">
               <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3">{s.title}</h2>
               <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">{s.body}</p>
             </div>

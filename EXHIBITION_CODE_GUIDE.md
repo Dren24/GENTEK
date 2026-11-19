@@ -34,7 +34,7 @@ GENTEK/
 │   │   ├── AuthModal.jsx           Log in / Sign up / code entry / forgot password
 │   │   ├── AppSidebar.jsx          left sidebar (history, search) for logged-in users
 │   │   ├── Navbar.jsx, Footer.jsx, GentekLogo.jsx, ConfirmModal.jsx
-│   │   └── PricingModal.jsx, PaymentModal.jsx   upgrade flow (demo payment)
+│   │   └── PricingModal.jsx, PaymentModal.jsx   upgrade flow (real PayPal card/PayPal checkout)
 │   ├── utils/
 │   │   ├── biasHighlight.js        highlight / replace detected words in the text
 │   │   └── biasScore.js            Male % / Female % / Neutral % split
@@ -143,11 +143,14 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | `PUT /auth/change-password/{id}` 🔒 | Change password (needs current one) |
 | `PUT /auth/update/{id}` 🔒 | Change display name |
 | `PUT /auth/notifications/{id}` 🔒 | Email notification setting |
-| `PUT /auth/upgrade/{id}` 🔒 | Mark account Premium (demo payment) |
 | `DELETE /auth/delete/{id}` 🔒 | Delete account and all its data |
 | `GET/POST /auth/history/{id}` 🔒 | List / save analyses |
 | `PUT/DELETE /auth/history/{id}/{analysis_id}` 🔒 | Update / delete one saved analysis |
 | `POST /auth/contact` | Contact form → email to GENTEK's inbox |
+| `GET /payments/config` | PayPal public client ID, prices, test/live mode |
+| `POST /payments/orders` 🔒 | Start a PayPal payment (server sets the price) |
+| `POST /payments/orders/{id}/capture` 🔒 | Take the money, verify it with PayPal → Premium on |
+| `GET /payments/status` 🔒 | Current plan (Premium ends by itself after 30/365 days) |
 
 **How the frontend calls them:** almost all go through `src/context/AuthContext.jsx` (e.g. `login()`, `verifyCode()`, `addToHistory()`), which adds the token with `authHeader()` and logs the user out automatically if the server says the token expired (`authFetch`, 401).
 
@@ -157,11 +160,12 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `users` | Accounts | `email` (unique), `password` (bcrypt hash), `is_premium`, `google_id`, `email_verified`, `has_password` |
+| `users` | Accounts | `email` (unique), `password` (bcrypt hash), `is_premium`, `premium_until`, `google_id`, `email_verified`, `has_password` |
 | `analyses` | Saved analyses (history) | `user_id` → users, `text`, `score`, `classification` |
 | `email_codes` | Pending 6-digit codes | `user_id`, `purpose` (verify/login/reset/setpw), `code_hash`, `attempts`, `expires_at` |
 | `trusted_devices` | Browsers that passed a code (30 days) | `user_id`, `token_hash`, `expires_at` |
 | `password_reset_tokens` | One-time reset tokens (10 min) | `user_id`, `token` (hashed), `expires_at` |
+| `payments` | PayPal checkouts | `user_id`, `order_id`, `capture_id`, `plan`, `amount`, `mode` (sandbox/live), `status` |
 
 **Relationships:** one **user** has many **analyses**, codes, trusted devices and reset tokens. Deleting a user deletes all of them (`delete_user` in auth.py + cascade in models.py).
 
@@ -183,6 +187,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | Google sign-in | `google_auth()` ~513 | Token verified **with Google's servers**, never trusted from the browser |
 | Safe HTML | `utils/biasHighlight.js` `escapeHtml()` | User text is escaped before highlighting (prevents XSS) |
 | AI output check | `_validate_llm_items()` analyzer.py ~710 | AI findings must exist in the text; invalid ones are dropped and logged |
+| Payments | `backend/payments.py` `capture_order()` | Card numbers go into **PayPal's** form, never GENTEK's. Premium turns on only after the **server** captures the payment with PayPal and checks status, amount and currency — the browser can't fake it or pick the price |
 | Secrets | `.env` files (git-ignored), Render env vars | No keys in the code or in Git |
 
 ---

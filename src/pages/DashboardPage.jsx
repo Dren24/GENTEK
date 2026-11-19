@@ -151,8 +151,10 @@ export default function DashboardPage() {
               <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Current Plan</p>
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-lg font-bold text-gray-900 dark:text-white">{user.is_premium ? 'Pro' : 'Free'}</p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500">{user.is_premium ? '$9 / month' : '$0 / forever'}</p>
+                  <p className="text-lg font-bold text-gray-900 dark:text-white">{user.is_premium ? 'Premium' : 'Free'}</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">{user.is_premium
+                    ? (user.premium_until ? `Until ${new Date(user.premium_until).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Active')
+                    : '₱0 / forever'}</p>
                 </div>
                 <span className="text-xs font-bold text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded-full px-3 py-1">Active</span>
               </div>
