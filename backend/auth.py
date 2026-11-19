@@ -255,12 +255,18 @@ def _rate_limit(kind: str, value: str):
 
 
 def premium_fields(user: User) -> dict:
-    """Plan fields sent to the browser: whether Premium is on right now and,
-    if it was paid for, when it ends (ISO UTC, or None)."""
+    """Plan fields sent to the browser:
+       is_premium        — Premium is on right now
+       premium_until     — when paid Premium ends (ISO UTC), while it's on
+       premium_cancelled — cancelled in Settings: stays on until premium_until
+       premium_ended     — when the last paid Premium ended (ISO UTC), once it has"""
     active = user.premium_active
+    iso = user.premium_until.isoformat() + "Z" if user.premium_until else None
     return {
         "is_premium": active,
-        "premium_until": user.premium_until.isoformat() + "Z" if active and user.premium_until else None,
+        "premium_until": iso if active else None,
+        "premium_cancelled": bool(active and iso and user.premium_cancelled),
+        "premium_ended": iso if (not active and iso) else None,
     }
 
 

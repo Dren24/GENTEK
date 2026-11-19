@@ -212,6 +212,50 @@ function ChangePasswordModal({ userId, onClose }) {
 
 // ── DeleteAccountModal — two-step confirmation before permanently deleting ─────
 // Step 1: warning screen. Step 2: type email to confirm.
+// ── fmtDate — "December 20, 2026" in the viewer's locale ──────────────────────
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+// ── CancelPremiumModal — confirm stopping Premium at the end of the paid period
+function CancelPremiumModal({ until, onConfirm, onCancel }) {
+  const [loading, setLoading] = useState(false)
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel} />
+      <div role="dialog" aria-modal="true" aria-labelledby="cancel-premium-title" className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden animate-fade-up">
+        <button onClick={onCancel} aria-label="Close" className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+          <X size={14} weight="bold" />
+        </button>
+        <div className="p-6 sm:p-8">
+          <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-5">
+            <Lightning size={22} weight="fill" className="text-amber-500" />
+          </div>
+          <h2 id="cancel-premium-title" className="text-lg font-bold text-gray-900 dark:text-white mb-2">Cancel Premium?</h2>
+          <ul className="text-sm text-gray-500 dark:text-gray-400 space-y-1.5 mb-6 list-disc pl-5 leading-relaxed">
+            <li>You already paid, so Premium <strong className="text-gray-700 dark:text-gray-200">stays on until {fmtDate(until)}</strong>.</li>
+            <li>After that, your account goes back to the Free plan. Your history is kept.</li>
+            <li>You won't be charged again — and you can undo this any time before then.</li>
+            <li>Charged by mistake? Contact us within 7 days for a refund.</li>
+          </ul>
+          <div className="flex flex-col-reverse sm:flex-row gap-3">
+            <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+              Keep Premium
+            </button>
+            <button
+              disabled={loading}
+              onClick={async () => { setLoading(true); await onConfirm(); setLoading(false) }}
+              className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+            >
+              {loading ? 'Cancelling…' : 'Cancel Premium'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DeleteAccountModal({ userEmail, onConfirm, onCancel }) {
   const [step, setStep]   = useState(1)   // 1 = warning, 2 = email confirm
   const [input, setInput] = useState('')
@@ -334,7 +378,7 @@ function Row({ icon: Icon, label, desc, children }) {
 
 // ════════════════════════ SETTINGS PAGE ══════════════════════════════════════
 export default function SettingsPage() {
-  const { user, logout, updateUser, updateNotifications, deleteAccount, openPricing } = useAuth()
+  const { user, logout, updateUser, updateNotifications, deleteAccount, openPricing, cancelPremium, resumePremium } = useAuth()
   const [dark, setDark]  = useDarkMode()
   const navigate         = useNavigate()
 
@@ -344,6 +388,9 @@ export default function SettingsPage() {
   const [showDeleteModal, setShowDeleteModal]     = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [showCreatePwModal, setShowCreatePwModal] = useState(false)
+  const [showCancelModal, setShowCancelModal]     = useState(false)
+  const [planBusy, setPlanBusy]   = useState(false)
+  const [planError, setPlanError] = useState('')
 
   // ── Redirect guests to homepage — settings requires auth ─────────────────
   // Must be after all hooks (Rules of Hooks)
@@ -475,22 +522,55 @@ export default function SettingsPage() {
 
           {/* ── Account section — sign out + delete account ───────────────── */}
           <Section title="Account">
-            {/* Plan — Premium end date, or an upgrade button (payments: backend/payments.py) */}
+            {/* Plan — Premium status + Extend / Cancel / Undo, or Upgrade / Buy again.
+                Premium is a one-time 30/365-day pass (backend/payments.py), so
+                "Cancel" just means it won't continue — it stays on until the
+                date already paid for, then the account returns to Free. */}
             <Row
               icon={Lightning}
-              label={user.is_premium ? 'Premium' : 'Free plan'}
-              desc={user.is_premium
-                ? (user.premium_until
-                    ? `Active until ${new Date(user.premium_until).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} · doesn't renew automatically`
-                    : 'Active')
-                : 'Upgrade for unlimited analyses and words'}
+              label={user.is_premium ? (user.premium_cancelled ? 'Premium · cancelled' : 'Premium') : 'Free plan'}
+              desc={<>
+                {user.is_premium
+                  ? (user.premium_until
+                      ? (user.premium_cancelled
+                          ? `Premium stays on until ${fmtDate(user.premium_until)}, then your account goes back to Free.`
+                          : `Active until ${fmtDate(user.premium_until)} · doesn't renew automatically`)
+                      : 'Active')
+                  : (user.premium_ended
+                      ? `Your Premium ended on ${fmtDate(user.premium_ended)}. Buy it again to unlock unlimited analyses.`
+                      : 'Upgrade for unlimited analyses and words')}
+                {planError && <span role="alert" className="block text-rose-500 mt-1">{planError}</span>}
+              </>}
             >
-              <button
-                onClick={openPricing}
-                className="text-xs font-semibold text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800 hover:border-brand-300 dark:hover:border-brand-700 px-3 py-1.5 rounded-xl transition-colors"
-              >
-                {user.is_premium ? 'Extend' : 'Upgrade'}
-              </button>
+              <div className="flex flex-wrap justify-end gap-2">
+                {user.is_premium && user.premium_until && !user.premium_cancelled && (
+                  <button
+                    onClick={() => { setPlanError(''); setShowCancelModal(true) }}
+                    className="text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 px-3 py-1.5 rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {user.is_premium && user.premium_cancelled ? (
+                  <button
+                    disabled={planBusy}
+                    onClick={async () => {
+                      setPlanBusy(true); setPlanError('')
+                      try { await resumePremium() } catch (e) { setPlanError(e.message) } finally { setPlanBusy(false) }
+                    }}
+                    className="text-xs font-semibold text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800 hover:border-brand-300 dark:hover:border-brand-700 px-3 py-1.5 rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    {planBusy ? 'Saving…' : 'Undo cancel'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={openPricing}
+                    className="text-xs font-semibold text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800 hover:border-brand-300 dark:hover:border-brand-700 px-3 py-1.5 rounded-xl transition-colors"
+                  >
+                    {user.is_premium ? 'Extend' : user.premium_ended ? 'Buy Premium again' : 'Upgrade'}
+                  </button>
+                )}
+              </div>
             </Row>
             {/* Sign Out — triggers logout() and navigates home */}
             <Row icon={SignOut} label="Sign Out" desc="Sign out of your GENTEK account">
@@ -525,6 +605,18 @@ export default function SettingsPage() {
         <ChangePasswordModal
           userId={user?.id}
           onClose={() => setShowPasswordModal(false)}
+        />
+      )}
+
+      {/* ── Cancel Premium confirmation ───────────────────────────────────── */}
+      {showCancelModal && (
+        <CancelPremiumModal
+          until={user.premium_until}
+          onConfirm={async () => {
+            try { await cancelPremium(); setShowCancelModal(false) }
+            catch (e) { setPlanError(e.message); setShowCancelModal(false) }
+          }}
+          onCancel={() => setShowCancelModal(false)}
         />
       )}
 

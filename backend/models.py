@@ -22,6 +22,9 @@ class User(Base):
     # When paid Premium ends (UTC). NULL with is_premium=1 = no end date (the
     # local dev test account, or accounts upgraded before payments existed).
     premium_until        = Column(DateTime, nullable=True)
+    # 1 = the user cancelled in Settings: Premium stays on until premium_until
+    # (already paid), then the account returns to Free. Buying again clears it.
+    premium_cancelled    = Column(Integer, default=0, server_default='0', nullable=False)
     google_id            = Column(String(255), unique=True, nullable=True, index=True)  # Google 'sub' claim, if linked
     # 1 once the owner proved the address (emailed code or Google). Defaults to
     # 1 so accounts created before verification existed aren't locked out;

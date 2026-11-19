@@ -44,7 +44,7 @@ const SECTIONS = [
   {
     id: 'payments',
     title: '10. Payments, Premium & Refunds',
-    body: `Premium is a one-time payment: ₱599 for 30 days or ₱5,388 for 365 days (prices may change; the price shown at checkout is the one you pay). Premium does not renew automatically, so there is no subscription to cancel — when the period ends, your account returns to the Free plan and your history is kept. Payments are processed by PayPal (card or PayPal balance); GENTEK never sees or stores your card details, and PayPal and GENTEK each email you a receipt. If you were charged by mistake, charged twice, or Premium did not turn on, contact us within 7 days through the Contact page with your PayPal transaction ID and we will fix it or refund you in full. Other refund requests are reviewed case by case.`,
+    body: `Premium is a one-time payment: ₱599 for 30 days or ₱5,388 for 365 days (prices may change; the price shown at checkout is the one you pay). Premium does not renew automatically. You can cancel it any time in Settings → Account: Premium then stays on until the end of the period you already paid for, you are not charged again, and you can undo the cancel before that date. When the period ends, your account returns to the Free plan and your history is kept. Payments are processed by PayPal (card or PayPal balance); GENTEK never sees or stores your card details, and PayPal and GENTEK each email you a receipt. If you were charged by mistake, charged twice, or Premium did not turn on, contact us within 7 days through the Contact page with your PayPal transaction ID and we will fix it or refund you in full. Other refund requests are reviewed case by case.`,
   },
   {
     title: '11. Governing Law',

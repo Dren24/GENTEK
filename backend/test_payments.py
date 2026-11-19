@@ -205,8 +205,39 @@ class PaymentTests(unittest.TestCase):
         db.commit()
         db.close()
         status = self.client.get("/payments/status", headers=self.h(self.ana_id)).json()
-        self.assertEqual(status, {"is_premium": False, "premium_until": None})
+        self.assertFalse(status["is_premium"])
+        self.assertIsNone(status["premium_until"])
+        self.assertTrue(status["premium_ended"])        # Settings shows "ended on … — buy again"
         self.assertFalse(self.user(self.ana_id).premium_active)   # what /analyze's word cap reads
+
+    def test_cancel_keeps_premium_until_end_then_resume(self):
+        self.capture(self.order().json()["id"])
+        until = self.user(self.ana_id).premium_until
+        res = self.client.post("/payments/cancel", headers=self.h(self.ana_id))
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["is_premium"])           # still Premium — it was paid for
+        self.assertTrue(res.json()["premium_cancelled"])
+        self.assertEqual(self.user(self.ana_id).premium_until, until)
+        res = self.client.post("/payments/resume", headers=self.h(self.ana_id))
+        self.assertFalse(res.json()["premium_cancelled"])
+
+    def test_cancelled_premium_ends_and_buying_again_clears_cancel(self):
+        self.capture(self.order().json()["id"])
+        self.client.post("/payments/cancel", headers=self.h(self.ana_id))
+        db = SessionLocal()
+        db.query(User).filter(User.id == self.ana_id).update({User.premium_until: datetime.utcnow() - timedelta(seconds=1)})
+        db.commit(); db.close()
+        st = self.client.get("/payments/status", headers=self.h(self.ana_id)).json()
+        self.assertEqual((st["is_premium"], st["premium_cancelled"]), (False, False))
+        self.assertTrue(st["premium_ended"])
+        res = self.capture(self.order().json()["id"])          # buy again
+        self.assertTrue(res.json()["is_premium"])
+        self.assertFalse(res.json()["premium_cancelled"])
+        self.assertAlmostEqual((self.user(self.ana_id).premium_until - datetime.utcnow()).days, 29, delta=1)
+
+    def test_cancel_needs_paid_premium(self):
+        self.assertEqual(self.client.post("/payments/cancel", headers=self.h(self.ben_id)).status_code, 400)
+        self.assertIn(self.client.post("/payments/cancel").status_code, (401, 403))
 
     def test_free_upgrade_route_is_gone(self):
         res = self.client.put(f"/auth/upgrade/{self.ana_id}", headers=self.h(self.ana_id))

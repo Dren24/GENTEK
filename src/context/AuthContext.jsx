@@ -360,13 +360,16 @@ export function AuthProvider({ children }) {
     }).catch(() => {})
   }
 
-  // ── applyPlan — store new plan fields ({is_premium, premium_until}) from the
-  // server, e.g. after a verified PayPal payment (PaymentModal). Premium is
-  // only ever turned on by the server — see backend/payments.py. ─────────────
+  // ── applyPlan — store new plan fields from the server ({is_premium,
+  // premium_until, premium_cancelled, premium_ended}), e.g. after a verified
+  // PayPal payment (PaymentModal) or a cancel. Premium is only ever turned on
+  // by the server — see backend/payments.py. ───────────────────────────────
+  const PLAN_KEYS = ['is_premium', 'premium_until', 'premium_cancelled', 'premium_ended']
   const applyPlan = (fields) => {
     setUser(prev => {
       if (!prev) return prev
-      const updated = { ...prev, is_premium: !!fields.is_premium, premium_until: fields.premium_until ?? null }
+      const updated = { ...prev }
+      for (const k of PLAN_KEYS) updated[k] = fields[k] ?? (k === 'is_premium' || k === 'premium_cancelled' ? false : null)
       ;(rememberMe ? localStorage : sessionStorage).setItem('gentek-user', JSON.stringify(updated))
       return updated
     })
@@ -379,10 +382,21 @@ export function AuthProvider({ children }) {
     authFetch('/payments/status')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data && (data.is_premium !== !!user.is_premium || (data.premium_until ?? null) !== (user.premium_until ?? null))) applyPlan(data)
+        if (data && PLAN_KEYS.some(k => (data[k] ?? null) !== (user[k] ?? null))) applyPlan(data)
       })
       .catch(() => {})
   }, [user?.id])
+
+  // ── cancelPremium / resumePremium — stop (or un-stop) Premium at the end of
+  // the paid period. Nothing is refunded or charged; see POST /payments/cancel.
+  const changePremium = async (action) => {
+    const res = await authFetch(`/payments/${action}`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.detail || 'Something went wrong. Please try again.')
+    applyPlan(data)
+  }
+  const cancelPremium = () => changePremium('cancel')
+  const resumePremium = () => changePremium('resume')
 
   // ── deleteAccount — permanently remove account from DB then log out ─────────
   const deleteAccount = async () => {
@@ -401,7 +415,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, resetPassword, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, applyPlan, deleteAccount,
+      user, token, authHeader, login, loginWithGoogle, register, verifyCode, resendCode, resetPassword, createPassword, sendCreatePasswordCode, logout, updateUser, updateNotifications, applyPlan, cancelPremium, resumePremium, deleteAccount,
       history: historyWithGroups, addToHistory, updateHistory, deleteHistory, lastDeletedId,
       sidebarOpen, toggleSidebar,
       pricingOpen, openPricing, closePricing,

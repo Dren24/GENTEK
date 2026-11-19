@@ -151,6 +151,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | `POST /payments/orders` 🔒 | Start a PayPal payment (server sets the price) |
 | `POST /payments/orders/{id}/capture` 🔒 | Take the money, verify it with PayPal → Premium on |
 | `GET /payments/status` 🔒 | Current plan (Premium ends by itself after 30/365 days) |
+| `POST /payments/cancel` / `resume` 🔒 | Cancel (Premium stays on until the paid end date, then Free) / undo |
 
 **How the frontend calls them:** almost all go through `src/context/AuthContext.jsx` (e.g. `login()`, `verifyCode()`, `addToHistory()`), which adds the token with `authHeader()` and logs the user out automatically if the server says the token expired (`authFetch`, 401).
 
@@ -160,7 +161,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `users` | Accounts | `email` (unique), `password` (bcrypt hash), `is_premium`, `premium_until`, `google_id`, `email_verified`, `has_password` |
+| `users` | Accounts | `email` (unique), `password` (bcrypt hash), `is_premium`, `premium_until`, `premium_cancelled`, `google_id`, `email_verified`, `has_password` |
 | `analyses` | Saved analyses (history) | `user_id` → users, `text`, `score`, `classification` |
 | `email_codes` | Pending 6-digit codes | `user_id`, `purpose` (verify/login/reset/setpw), `code_hash`, `attempts`, `expires_at` |
 | `trusted_devices` | Browsers that passed a code (30 days) | `user_id`, `token_hash`, `expires_at` |

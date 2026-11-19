@@ -143,6 +143,36 @@ def payment_status(db: Session = Depends(get_db), current_user: dict = Depends(a
     return auth.premium_fields(user)
 
 
+def _paid_premium_user(current_user: dict, db: Session) -> User:
+    user = db.query(User).filter(User.id == current_user["id"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not (user.premium_active and user.premium_until):
+        raise HTTPException(status_code=400, detail="You don't have a paid Premium plan to change.")
+    return user
+
+
+# ── POST /payments/cancel — stop Premium at the end of the paid period ────────
+# Nothing is ever charged automatically, so cancelling takes no money back and
+# needs nothing from PayPal: Premium simply stays on until premium_until (it
+# was paid for) and the account then returns to Free. Undo with /resume.
+@router.post("/cancel")
+def cancel_premium(db: Session = Depends(get_db), current_user: dict = Depends(auth.get_current_user)):
+    user = _paid_premium_user(current_user, db)
+    user.premium_cancelled = 1
+    db.commit()
+    return auth.premium_fields(user)
+
+
+# ── POST /payments/resume — undo a cancel before Premium ends ────────────────
+@router.post("/resume")
+def resume_premium(db: Session = Depends(get_db), current_user: dict = Depends(auth.get_current_user)):
+    user = _paid_premium_user(current_user, db)
+    user.premium_cancelled = 0
+    db.commit()
+    return auth.premium_fields(user)
+
+
 class OrderRequest(BaseModel):
     plan: str
 
@@ -196,6 +226,7 @@ def _activate_premium(user: User, payment: Payment, capture: dict, db: Session):
     start = user.premium_until if (user.premium_active and user.premium_until and user.premium_until > now) else now
     user.is_premium = 1
     user.premium_until = start + timedelta(days=PLAN_DAYS[payment.plan])
+    user.premium_cancelled = 0   # buying again undoes an earlier cancel
     payment.status = "COMPLETED"
     payment.capture_id = capture.get("id")
     payment.completed_at = now
