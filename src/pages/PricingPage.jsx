@@ -57,7 +57,7 @@ function PlanCard({ plan, onUpgrade }) {
           <>
             <div className="flex items-end gap-1.5 mb-1">
               <span className="text-5xl font-extrabold text-white">₱{price.toLocaleString()}</span>
-              <span className="text-gray-400 text-sm mb-1.5">/month</span>
+              <span className="text-gray-400 text-sm mb-1.5">/30 days</span>
             </div>
           </>
         )}

@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom'
 const SECTIONS = [
   {
     title: '1. Information We Collect',
-    body: `When you create an account, we collect your name and email address. When you use the analysis feature, the text you submit is processed to generate results. We also store your analysis history (text, score, classification) in our database so you can review past results. We do not collect payment card details directly — payment processing is handled by third-party providers.`,
+    body: `When you create an account, we collect your name and email address. When you use the analysis feature, the text you submit is processed to generate results. We also store your analysis history (text, score, classification) in our database so you can review past results. We never receive or store payment card details — card payments are processed by PayPal, and we keep only the payment amount, date and PayPal transaction ID.`,
   },
   {
     title: '2. How We Use Your Information',
@@ -27,7 +27,7 @@ const SECTIONS = [
   },
   {
     title: '6. Text You Submit for Analysis',
-    body: `Text you submit is processed on our servers to generate analysis results. We store this text as part of your analysis history so you can review it later. We do not use your submitted text to train AI models, share it with third parties, or use it for any purpose other than providing the analysis service.`,
+    body: `Text you submit is processed on our servers and sent to our AI provider (currently Groq, with Hugging Face as a backup) to generate the analysis results. Guest text is not saved. If you are signed in, we store the text in your analysis history so you can review or delete it later. We do not use your text to train AI models, sell it, or use it for any purpose other than providing the analysis service.`,
   },
   {
     title: '7. Third-Party Services',
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
           <p className="section-label mb-3">Legal</p>
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Privacy Policy</h1>
           <p className="text-gray-500 dark:text-gray-400 text-base leading-relaxed">
-            Last updated: July 3, 2026. We value your privacy and are committed to protecting your personal information.
+            Last updated: November 20, 2026. We value your privacy and are committed to protecting your personal information.
           </p>
         </div>
       </section>

@@ -143,7 +143,7 @@ const QUICK = [
 const FAQS = [
   { q: 'How does GENTEK find biased language?',   a: 'GENTEK checks your text for gendered terms and role assumptions, then explains each finding in plain language.' },
   { q: 'What results will I see?',                a: 'You will see a bias category, a score, highlighted terms, short explanations, and inclusive alternatives you can use in your rewrite.' },
-  { q: 'Is my text stored or sent anywhere?',     a: 'Guest analysis is temporary. If you sign in, you can save recent analyses to your account history for later review.' },
+  { q: 'Is my text stored or sent anywhere?',     a: 'To analyze it, your text is sent to GENTEK\'s server and to our AI provider. Guest text is not saved. If you sign in, your analyses are saved to your history, and you can delete them anytime.' },
   { q: 'What types of writing work best?',        a: 'GENTEK works best with English essays, emails, job posts, reports, policy drafts, and other professional or academic text.' },
   { q: 'Do I need an account?',                   a: 'No. You can start analyzing text right away. An account is useful when you want to keep analysis history.' },
 ]
@@ -193,11 +193,12 @@ const STEPS = [
 
 // ── PLAN_FEATURES — comparison rows for the inline Pricing section (guests only) ──
 const PLAN_FEATURES = [
-  { label: 'Analyses / month',    free: '200',   pro: 'Unlimited' },
-  { label: 'Suggestion depth',    free: 'Basic', pro: 'Advanced'  },
-  { label: 'Analysis history',    free: false,   pro: true        },
-  { label: 'API access',          free: false,   pro: true        },
-  { label: 'Priority processing', free: false,   pro: true        },
+  { label: 'Words per analysis',          free: '500',       pro: 'No limit'  },
+  { label: 'AI bias detection',           free: true,        pro: true        },
+  { label: 'Suggestions + Rewrite',       free: true,        pro: true        },
+  { label: 'Upload PDF / Word / TXT',     free: true,        pro: true        },
+  { label: 'Saved history (with account)', free: true,       pro: true        },
+  { label: 'Long documents (500+ words)', free: false,       pro: true        },
 ]
 
 // ── WordPopup — suggestion card for one clicked highlight ──────────────────────
@@ -1118,13 +1119,13 @@ export default function HomePage() {
                       <span className={`font-semibold ${shownWords >= GUEST_WORD_LIMIT ? 'text-rose-500' : shownWords >= Math.round(GUEST_WORD_LIMIT * 0.8) ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
                         {shownWords}/{GUEST_WORD_LIMIT} words
                       </span>
-                      {/* "Upgrade for unlimited" nudge — shown at ≥80 words */}
+                      {/* "Sign up for more words" nudge — shown at ≥80% of the guest limit */}
                       {wordCount >= Math.round(GUEST_WORD_LIMIT * 0.8) && (
                         <button
-                          onClick={openPricing}
+                          onClick={() => setShowAuthPrompt(true)}
                           className="text-brand-600 dark:text-brand-400 hover:underline font-semibold"
                         >
-                          Upgrade for unlimited →
+                          Sign up free for 500 words →
                         </button>
                       )}
                       {/* nudge after both free analyses are used */}
@@ -1423,10 +1424,10 @@ export default function HomePage() {
             <div className="reveal card p-8 flex flex-col">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Free</h3>
               <div className="flex items-end gap-1 mb-4">
-                <span className="text-5xl font-extrabold text-gray-900 dark:text-white">$0</span>
+                <span className="text-5xl font-extrabold text-gray-900 dark:text-white">₱0</span>
                 <span className="text-gray-400 dark:text-gray-500 mb-1.5">/forever</span>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Perfect for students and writers getting started.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Perfect for students and everyday writing.</p>
               <button onClick={() => setShowAuthPrompt(true)} className="btn-outline w-full justify-center mb-6">Get Started Free</button>
               <ul className="space-y-3 mt-auto">
                 {PLAN_FEATURES.map(f => (
@@ -1440,26 +1441,28 @@ export default function HomePage() {
                 ))}
               </ul>
             </div>
-            {/* Pro plan card — featured with border and badge */}
+            {/* Premium plan card — featured with border and badge */}
             <div className="reveal reveal-delay-2 relative card p-8 flex flex-col border-2 border-brand-500 bg-brand-50/20 dark:bg-brand-900/10">
               <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
                 <span className="inline-flex items-center gap-1.5 bg-brand-600 text-white text-xs font-bold px-3.5 py-1.5 rounded-full shadow-btn">
-                  <Lightning size={11} weight="fill" />Most Popular
+                  <Lightning size={11} weight="fill" />For long documents
                 </span>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Pro</h3>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Premium</h3>
               <div className="flex items-end gap-1 mb-4">
-                <span className="text-5xl font-extrabold text-gray-900 dark:text-white">$9</span>
-                <span className="text-gray-400 dark:text-gray-500 mb-1.5">/month</span>
+                <span className="text-5xl font-extrabold text-gray-900 dark:text-white">₱599</span>
+                <span className="text-gray-400 dark:text-gray-500 mb-1.5">/30 days</span>
               </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">For professionals, HR teams, and organizations.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">One-time payment. No auto-renew — cancel anytime.</p>
               <button onClick={() => setShowAuthPrompt(true)} className="btn-primary w-full justify-center mb-6">
-                Start Pro Trial <ArrowRight size={14} weight="bold" />
+                Sign up to upgrade <ArrowRight size={14} weight="bold" />
               </button>
               <ul className="space-y-3 mt-auto">
                 {PLAN_FEATURES.map(f => (
                   <li key={f.label} className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-300">
-                    <Check size={14} weight="bold" className="text-brand-500 flex-shrink-0" />
+                    {f.pro === false
+                      ? <X size={14} weight="bold" className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                      : <Check size={14} weight="bold" className="text-brand-500 flex-shrink-0" />}
                     <span>{f.label}</span>
                     {typeof f.pro === 'string' && <span className="ml-auto text-xs font-semibold text-brand-600 dark:text-brand-400">{f.pro}</span>}
                   </li>

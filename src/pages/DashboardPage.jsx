@@ -160,8 +160,8 @@ export default function DashboardPage() {
               </div>
               <ul className="space-y-2 mb-4">
                 {(user.is_premium
-                  ? ['Unlimited analyses', 'Advanced detection', 'Unlimited suggestions', 'Full analysis history']
-                  : ['200 analyses / month', 'Basic detection', '3 suggestions max', 'Word highlighting']
+                  ? ['No word limit', 'AI bias detection', 'Suggestions + Rewrite', 'Saved history']
+                  : ['500 words per analysis', 'AI bias detection', 'Suggestions + Rewrite', 'Saved history']
                 ).map((f) => (
                   <li key={f} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <Check size={12} weight="bold" className="text-gray-400 dark:text-gray-500" />
@@ -171,7 +171,7 @@ export default function DashboardPage() {
               </ul>
               {!user.is_premium && (
                 <Link to="/pricing" className="btn-outline w-full justify-center text-xs py-2.5">
-                  View Pro features
+                  See Premium
                 </Link>
               )}
             </div>
@@ -181,9 +181,9 @@ export default function DashboardPage() {
               <div className="card p-5">
                 <div className="flex items-center gap-1.5 mb-1">
                   <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
-                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Pro</span>
+                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Premium</span>
                 </div>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mb-3">Unlimited analyses, exports, API access and history.</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mb-3">Analyze long documents with no 500-word limit.</p>
                 <Link to="/pricing" className="btn-primary w-full justify-center text-xs py-2.5">
                   Upgrade →
                 </Link>

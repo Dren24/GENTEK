@@ -442,15 +442,15 @@ export default function AppSidebar() {
                   <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
                   <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Premium Account</span>
                 </div>
-                <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mt-1">Unlimited analyses, exports, API access and history — all unlocked.</p>
+                <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mt-1">No word limit — analyze whole documents at once.</p>
               </div>
             ) : (
               <div className="mx-3 p-3 rounded-xl bg-white dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 shadow-sm dark:shadow-none mb-3">
                 <div className="flex items-center gap-1.5 mb-1">
                   <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
-                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Pro</span>
+                  <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Premium</span>
                 </div>
-                <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mb-2">Unlimited analyses, exports, API access and history.</p>
+                <p className="text-[11px] text-gray-500 dark:text-brand-400 leading-relaxed mb-2">Analyze long documents with no 500-word limit.</p>
                 {/* Upgrade button — opens PricingModal */}
                 <button onClick={openPricing} className="block w-full text-center text-[11px] font-bold bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-1.5 transition-colors">
                   Upgrade →
