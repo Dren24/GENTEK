@@ -27,7 +27,7 @@ const SECTIONS = [
   },
   {
     title: '6. Text You Submit for Analysis',
-    body: `Text you submit is processed on our servers and sent to our AI provider (currently Groq, with Hugging Face as a backup) to generate the analysis results. Guest text is not saved. If you are signed in, we store the text in your analysis history so you can review or delete it later. We do not use your text to train AI models, sell it, or use it for any purpose other than providing the analysis service.`,
+    body: `Text you submit is processed on our servers and sent to our AI provider (Hugging Face, with Groq as a backup) to generate the analysis results. Guest text is not saved. If you are signed in, we store the text in your analysis history so you can review or delete it later. We do not use your text to train AI models, sell it, or use it for any purpose other than providing the analysis service.`,
   },
   {
     title: '7. Third-Party Services',
