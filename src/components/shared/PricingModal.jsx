@@ -146,7 +146,7 @@ export default function PricingModal() {
             Upgrade GENTEK
           </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">Simple, honest pricing</h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">Start free. Upgrade when your text is longer than 500 words.</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Start free. Upgrade for long documents and unlimited uploads.</p>
 
         </div>
 

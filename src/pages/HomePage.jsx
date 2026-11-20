@@ -196,7 +196,7 @@ const PLAN_FEATURES = [
   { label: 'Words per analysis',          free: '500',       pro: 'No limit'  },
   { label: 'AI bias detection',           free: true,        pro: true        },
   { label: 'Suggestions + Rewrite',       free: true,        pro: true        },
-  { label: 'Upload PDF / Word / TXT',     free: true,        pro: true        },
+  { label: 'File uploads',                free: '2 / day',   pro: 'Unlimited' },
   { label: 'Saved history (with account)', free: true,       pro: true        },
   { label: 'Long documents (500+ words)', free: false,       pro: true        },
 ]
@@ -318,6 +318,14 @@ function WordPopup({ start, word, suggestion, reason, type, containerRef, onAppl
   )
 }
 
+// ── uploadLimitMessage — text shown when a Free account has no uploads left ──
+function uploadLimitMessage(q) {
+  const when = q?.resets_at
+    ? new Date(q.resets_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : 'midnight'
+  return `You've used your ${q?.limit ?? 2} free uploads for today (resets at ${when}). You can still paste text, or upgrade for unlimited uploads.`
+}
+
 // ════════════════════════ HOMEPAGE ════════════════════════════════════════════
 export default function HomePage() {
   const { user, addToHistory, updateHistory, deleteHistory, lastDeletedId, openPricing, authHeader } = useAuth()
@@ -362,6 +370,10 @@ export default function HomePage() {
   const [uploadError, setUploadError]   = useState(null)
   const [uploadedFile, setUploadedFile] = useState(null)
   const uploadSeqRef             = useRef(0)           // ignores a slow file if another was picked since
+  // Free plan: 2 file uploads per day (backend/uploads.py). null = not loaded
+  // yet / Premium; {limit, used, remaining, resets_at} for Free accounts.
+  const [uploadQuota, setUploadQuota]   = useState(null)
+  const [uploadLimitHit, setUploadLimitHit] = useState(false)  // shows an Upgrade button in the error
   const currentHistoryIdRef      = useRef(null)       // id of currently-loaded history item
   const textStackRef             = useRef([])          // undo/redo text snapshots
   const stackIdxRef              = useRef(-1)          // current position in stack
@@ -414,13 +426,44 @@ export default function HomePage() {
   // resulting text goes into the editor and, on Analyze, to /analyze.
   const parseFile = async (file) => {
     if (!file) return
+    setUploadLimitHit(false)
+    // Guests can't upload (also blocks drag-and-drop) — files need an account
+    if (!user) {
+      setUploadError('Log in or create a free account to upload files.')
+      setShowAuthPrompt(true)
+      return
+    }
+    if (uploadQuota && uploadQuota.limit != null && uploadQuota.remaining <= 0) {
+      setUploadError(uploadLimitMessage(uploadQuota))
+      setUploadLimitHit(true)
+      return
+    }
     const seq = ++uploadSeqRef.current
     setUploadError(null)
     setUploadedFile(null)
     setUploading('Reading file…')
     try {
-      const { text: extracted } = await extractText(file, msg => { if (seq === uploadSeqRef.current) setUploading(msg) })
+      const { text: extracted, kind } = await extractText(file, msg => { if (seq === uploadSeqRef.current) setUploading(msg) })
       if (seq !== uploadSeqRef.current) return
+      // Only a file that was read successfully uses one of today's uploads
+      const claim = await fetch('/uploads/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ kind }),
+      }).catch(() => null)
+      if (seq !== uploadSeqRef.current) return
+      const quota = claim ? await claim.json().catch(() => ({})) : {}
+      if (!claim || !claim.ok) {
+        if (claim?.status === 429) {
+          setUploadQuota(quota.detail)
+          setUploadError(uploadLimitMessage(quota.detail))
+          setUploadLimitHit(true)
+        } else {
+          setUploadError("Couldn't check your upload limit. Please check your connection and try again.")
+        }
+        return
+      }
+      setUploadQuota(quota.limit == null ? null : quota)
       // Guests keep their hard word limit, same as typing/pasting
       const kept = limitGuestWords(extracted)
       const words = kept.trim().split(/\s+/).length
@@ -439,6 +482,17 @@ export default function HomePage() {
     }
   }
 
+  // ── Upload quota — refreshed on login and when the plan changes ────────────
+  useEffect(() => {
+    if (!user?.id) { setUploadQuota(null); return }
+    let alive = true
+    fetch('/uploads/quota', { headers: authHeader() })
+      .then(r => r.ok ? r.json() : null)
+      .then(q => { if (alive && q) setUploadQuota(q.limit == null ? null : q) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [user?.id, user?.is_premium])
+
   // ── removeUploadedFile — drops the loaded document so another can be chosen
   const removeUploadedFile = () => {
     if (uploadedFile && text === uploadedFile.text) clear()
@@ -451,6 +505,13 @@ export default function HomePage() {
   const openFilePicker = (accept) => {
     const input = fileInputRef.current
     if (!input) return
+    // Out of free uploads → explain instead of opening the picker (the quota is
+    // already loaded, so this stays synchronous inside the tap)
+    if (uploadQuota && uploadQuota.limit != null && uploadQuota.remaining <= 0) {
+      setUploadError(uploadLimitMessage(uploadQuota))
+      setUploadLimitHit(true)
+      return
+    }
     input.accept = accept
     input.click()
   }
@@ -929,10 +990,19 @@ export default function HomePage() {
                       type="button"
                       onClick={() => openFilePicker(ACCEPT.all)}
                       disabled={!!uploading}
-                      aria-label="Upload a PDF, Word (.docx) or TXT file"
+                      aria-label={`Upload a PDF, Word (.docx) or TXT file${uploadQuota ? ` — ${uploadQuota.remaining} of ${uploadQuota.limit} free uploads left today` : ''}`}
+                      title={uploadQuota ? `${uploadQuota.remaining} of ${uploadQuota.limit} free uploads left today` : undefined}
                       className="flex items-center gap-1.5 text-xs font-medium text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 px-2.5 py-1.5 min-h-[36px] rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/20 disabled:opacity-50 transition-colors"
                     >
                       {uploading ? <SpinnerGap size={13} className="animate-spin" /> : <UploadSimple size={13} weight="bold" />}Upload
+                      {/* Free plan: uploads left today */}
+                      {uploadQuota && (
+                        <span className={`ml-0.5 px-1.5 py-px rounded-full text-[10px] font-semibold ${uploadQuota.remaining > 0
+                          ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                          : 'bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400'}`}>
+                          {uploadQuota.remaining}/{uploadQuota.limit}
+                        </span>
+                      )}
                     </button>
                     {/* Hover dropdown — file type options */}
                     <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-card py-2 opacity-0 invisible [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:visible transition-all z-20">
@@ -1063,8 +1133,13 @@ export default function HomePage() {
               {uploadError && !uploading && (
                 <div role="alert" className="mx-5 mb-3 flex items-start gap-2 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2">
                   <WarningCircle size={14} weight="fill" className="flex-shrink-0 mt-px" />
-                  <span className="flex-1">{uploadError}</span>
-                  <button type="button" onClick={() => setUploadError(null)} aria-label="Dismiss" className="-m-1 p-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/40"><X size={12} weight="bold" /></button>
+                  <span className="flex-1">
+                    {uploadError}
+                    {uploadLimitHit && (
+                      <button type="button" onClick={openPricing} className="ml-1.5 font-semibold underline hover:no-underline">Upgrade to Premium</button>
+                    )}
+                  </span>
+                  <button type="button" onClick={() => { setUploadError(null); setUploadLimitHit(false) }} aria-label="Dismiss" className="-m-1 p-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/40"><X size={12} weight="bold" /></button>
                 </div>
               )}
               {uploadedFile && !uploading && !results && text === uploadedFile.text && (

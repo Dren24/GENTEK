@@ -160,8 +160,8 @@ export default function DashboardPage() {
               </div>
               <ul className="space-y-2 mb-4">
                 {(user.is_premium
-                  ? ['No word limit', 'AI bias detection', 'Suggestions + Rewrite', 'Saved history']
-                  : ['500 words per analysis', 'AI bias detection', 'Suggestions + Rewrite', 'Saved history']
+                  ? ['No word limit', 'Unlimited file uploads', 'Suggestions + Rewrite', 'Saved history']
+                  : ['500 words per analysis', '2 file uploads per day', 'Suggestions + Rewrite', 'Saved history']
                 ).map((f) => (
                   <li key={f} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <Check size={12} weight="bold" className="text-gray-400 dark:text-gray-500" />
@@ -183,7 +183,7 @@ export default function DashboardPage() {
                   <Lightning size={12} weight="fill" className="text-brand-600 dark:text-brand-400" />
                   <span className="text-xs font-bold text-brand-700 dark:text-brand-300">Go Premium</span>
                 </div>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mb-3">Analyze long documents with no 500-word limit.</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed mb-3">No 500-word limit and unlimited file uploads.</p>
                 <Link to="/pricing" className="btn-primary w-full justify-center text-xs py-2.5">
                   Upgrade →
                 </Link>

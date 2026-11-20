@@ -18,6 +18,7 @@ from models import User
 from analyzer import analyze
 import auth
 import payments
+import uploads
 
 # ── Create DB tables on startup (no-op if they already exist) ─────────────────
 Base.metadata.create_all(bind=engine)
@@ -79,6 +80,9 @@ app.include_router(auth.router)
 
 # ── Payments router — /payments/config, /payments/orders (PayPal checkout) ────
 app.include_router(payments.router)
+
+# ── Uploads router — /uploads/quota, /uploads/claim (Free: 2 files per day) ───
+app.include_router(uploads.router)
 
 
 # ── Analyze request schema ────────────────────────────────────────────────────

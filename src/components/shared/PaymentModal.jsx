@@ -54,7 +54,7 @@ function SuccessScreen({ premiumUntil, testMode, onDone }) {
       <div>
         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">You're Premium!</h3>
         <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs">
-          Payment received{testMode ? ' (test mode — no real money)' : ''}. The 500-word limit is lifted — you can analyze whole documents now.
+          Payment received{testMode ? ' (test mode — no real money)' : ''}. The 500-word limit is lifted and file uploads are unlimited.
         </p>
       </div>
       <div className="w-full bg-gray-50 dark:bg-gray-800 rounded-xl p-4 text-left space-y-2 text-sm">

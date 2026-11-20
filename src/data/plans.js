@@ -19,7 +19,7 @@ export const PLANS = [
       { label: 'AI gender bias detection',          note: 'Male, Female & Gender-Neutral' },
       { label: 'Highlighted words with explanations' },
       { label: 'Suggestions + one-click Rewrite' },
-      { label: 'Upload PDF, Word or TXT files' },
+      { label: '2 file uploads per day',            note: 'PDF, Word or TXT — with a free account' },
       { label: 'Saved analysis history',            note: 'With a free account' },
       { label: 'No credit card required' },
     ],
@@ -35,6 +35,7 @@ export const PLANS = [
     badge: 'FOR LONG DOCUMENTS',
     benefits: [
       { label: 'No 500-word limit',                 note: 'Analyze a whole document at once' },
+      { label: 'Unlimited file uploads',            note: 'PDF, Word or TXT' },
       { label: 'Everything in Free' },
       { label: 'One-time payment, 30 days',         note: "Doesn't renew automatically" },
       { label: 'Cancel anytime in Settings' },
@@ -53,7 +54,7 @@ export const COMPARISON = [
   { label: 'AI gender bias detection',   free: true,               premium: true },
   { label: 'Highlights + explanations',  free: true,               premium: true },
   { label: 'Suggestions + Rewrite Text', free: true,               premium: true },
-  { label: 'Upload PDF / Word / TXT',    free: true,               premium: true },
+  { label: 'File uploads (PDF / Word / TXT)', free: '2 per day',   premium: 'Unlimited' },
   { label: 'Saved analysis history',     free: true,               premium: true },
   { label: 'Long documents (500+ words)', free: false,             premium: true },
 ]

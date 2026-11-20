@@ -130,3 +130,16 @@ class Payment(Base):
     status       = Column(String(20), nullable=False, default="CREATED")  # CREATED | COMPLETED | PENDING | FAILED
     created_at   = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
+
+
+# ── Upload table ──────────────────────────────────────────────────────────────
+# One row per file a user uploaded (PDF/Word/TXT). Used only to count today's
+# uploads for the Free plan's daily limit (backend/uploads.py). The file itself
+# is never stored — it's read in the browser.
+class Upload(Base):
+    __tablename__ = "uploads"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    kind       = Column(String(10), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)

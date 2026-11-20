@@ -537,8 +537,8 @@ export default function SettingsPage() {
                           : `Active until ${fmtDate(user.premium_until)} · doesn't renew automatically`)
                       : 'Active')
                   : (user.premium_ended
-                      ? `Your Premium ended on ${fmtDate(user.premium_ended)}. Buy it again to analyze texts longer than 500 words.`
-                      : 'Upgrade to analyze texts longer than 500 words')}
+                      ? `Your Premium ended on ${fmtDate(user.premium_ended)}. Buy it again for no word limit and unlimited uploads.`
+                      : 'Upgrade for no word limit and unlimited file uploads')}
                 {planError && <span role="alert" className="block text-rose-500 mt-1">{planError}</span>}
               </>}
             >

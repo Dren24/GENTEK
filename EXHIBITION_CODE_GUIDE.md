@@ -152,6 +152,8 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | `POST /payments/orders/{id}/capture` 🔒 | Take the money, verify it with PayPal → Premium on |
 | `GET /payments/status` 🔒 | Current plan (Premium ends by itself after 30 days) |
 | `POST /payments/cancel` / `resume` 🔒 | Cancel (Premium stays on until the paid end date, then Free) / undo |
+| `GET /uploads/quota` 🔒 | Free uploads left today (Free: 2/day, Premium: unlimited) |
+| `POST /uploads/claim` 🔒 | Use one upload after a file was read successfully; 429 when none left |
 
 **How the frontend calls them:** almost all go through `src/context/AuthContext.jsx` (e.g. `login()`, `verifyCode()`, `addToHistory()`), which adds the token with `authHeader()` and logs the user out automatically if the server says the token expired (`authFetch`, 401).
 
@@ -166,6 +168,7 @@ All `/auth/...` routes are in `backend/auth.py`; the others are in `backend/main
 | `email_codes` | Pending 6-digit codes | `user_id`, `purpose` (verify/login/reset/setpw), `code_hash`, `attempts`, `expires_at` |
 | `trusted_devices` | Browsers that passed a code (30 days) | `user_id`, `token_hash`, `expires_at` |
 | `password_reset_tokens` | One-time reset tokens (10 min) | `user_id`, `token` (hashed), `expires_at` |
+| `uploads` | One row per uploaded file (count only — files are never stored) | `user_id`, `kind`, `created_at` |
 | `payments` | PayPal checkouts | `user_id`, `order_id`, `capture_id`, `plan`, `amount`, `mode` (sandbox/live), `status` |
 
 **Relationships:** one **user** has many **analyses**, codes, trusted devices and reset tokens. Deleting a user deletes all of them (`delete_user` in auth.py + cascade in models.py).

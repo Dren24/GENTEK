@@ -52,7 +52,7 @@ from html import escape
 load_dotenv()
 
 from database import get_db
-from models import User, Analysis, PasswordResetToken, EmailCode, TrustedDevice, Payment
+from models import User, Analysis, PasswordResetToken, EmailCode, TrustedDevice, Payment, Upload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -732,7 +732,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db), current_user: dict 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    for model in (EmailCode, TrustedDevice, PasswordResetToken, Payment):
+    for model in (EmailCode, TrustedDevice, PasswordResetToken, Payment, Upload):
         db.query(model).filter(model.user_id == user_id).delete()
     db.delete(user)
     db.commit()

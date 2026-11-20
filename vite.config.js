@@ -15,6 +15,7 @@ export default defineConfig({
       '/health':  'http://localhost:8000',
       '/auth':    { target: 'http://localhost:8000', changeOrigin: true },
       '/payments': { target: 'http://localhost:8000', changeOrigin: true },
+      '/uploads':  { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
 })
