@@ -29,7 +29,7 @@ export default function ResetPasswordPage() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) { setError('Use at least 8 characters, including a letter and a number.'); return }
     if (password !== confirm) { setError('Passwords do not match.'); return }
     setLoading(true)
     try {
@@ -105,7 +105,7 @@ export default function ResetPasswordPage() {
                   <LockKey size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
                     type={showPass ? 'text' : 'password'}
-                    placeholder="At least 6 characters"
+                    placeholder="8+ characters, a letter and a number"
                     value={password}
                     onChange={e => { setPassword(e.target.value); setError('') }}
                     required

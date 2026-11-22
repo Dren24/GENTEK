@@ -124,7 +124,7 @@ function ChangePasswordModal({ userId, onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    if (form.newPass.length < 6) { setError('New password must be at least 6 characters.'); return }
+    if (form.newPass.length < 8 || !/[A-Za-z]/.test(form.newPass) || !/\d/.test(form.newPass)) { setError('Use at least 8 characters, including a letter and a number.'); return }
     if (form.newPass !== form.confirm) { setError('Passwords do not match.'); return }
     setLoading(true)
     try {
@@ -192,7 +192,7 @@ function ChangePasswordModal({ userId, onClose }) {
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Enter your current password then choose a new one.</p>
               <form onSubmit={handleSubmit} className="space-y-4">
                 {field('current', 'Your current password', 'Current Password')}
-                {field('newPass', 'At least 6 characters',  'New Password')}
+                {field('newPass', '8+ characters, a letter and a number',  'New Password')}
                 {field('confirm', 'Repeat new password',    'Confirm New Password')}
                 {error && (
                   <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2 text-center">{error}</p>

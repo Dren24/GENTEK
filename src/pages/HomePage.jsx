@@ -1300,8 +1300,8 @@ export default function HomePage() {
                     </>
                   ) : (
                     <>
-                    /* Nothing to rewrite — confirm the text was analyzed, without
-                       claiming certainty that it's guaranteed bias-free */
+                    {/* Nothing to rewrite — confirm the text was analyzed, without
+                       claiming certainty that it's guaranteed bias-free */}
                     <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 dark:text-brand-400">
                       <CheckCircle size={16} weight="fill" />
                       Analyzed — No significant bias detected

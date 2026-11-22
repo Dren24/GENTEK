@@ -431,8 +431,7 @@ def verify_password(password: str, hashed: str) -> bool:
 def register(req: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
-    if len(req.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    _check_password_strength(req.password)
     user = db.query(User).filter(User.email == req.email).first()
     if user and user.email_verified:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -645,8 +644,7 @@ def change_password(user_id: int, req: ChangePasswordRequest, db: Session = Depe
         raise HTTPException(status_code=400, detail="This account has no password yet. Use Create password instead.")
     if not verify_password(req.current_password, user.password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    if len(req.new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    _check_password_strength(req.new_password)
     user.password = hash_password(req.new_password)
     db.commit()
     return {"message": "Password changed successfully"}
@@ -973,8 +971,7 @@ class ResetPasswordRequest(BaseModel):
 
 @router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
-    if len(req.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    _check_password_strength(req.new_password)
     invalid = HTTPException(status_code=400, detail="This reset session has expired. Please request a new code.")
     record = db.query(PasswordResetToken).filter(PasswordResetToken.token == _sha256(req.token)).first()
     if not record or record.expires_at < datetime.utcnow():
