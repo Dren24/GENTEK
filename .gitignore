@@ -5,3 +5,7 @@ dist/
 .DS_Store
 *.local
 .claude/
+
+# Playwright run output
+test-results/
+playwright-report/
