@@ -18,4 +18,9 @@ export default defineConfig({
       '/uploads':  { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
+  // Vitest (frontend tests). Rendering a whole 500+ word page in jsdom can
+  // take longer than the 5 s default on slower laptops.
+  test: {
+    testTimeout: 20000,
+  },
 })

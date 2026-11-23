@@ -337,6 +337,17 @@ class LLMLayerTests(unittest.TestCase):
         self.assertFalse(result["ai_powered"])
         self.assertEqual([d["word"] for d in result["detected"]], ["chairman"])
 
+    def test_all_providers_timing_out_falls_back_to_keywords(self):
+        # Timeouts have no HTTP status; this used to crash /analyze with a 500
+        chain = [_entry("llama", "huggingface"), _entry("gpt-oss-120b", "groq")]
+        timeout = analyzer.requests.exceptions.ReadTimeout("Read timed out. (read timeout=30)")
+        with mock.patch.object(analyzer, "LLM_CHAIN", chain), \
+             mock.patch.object(analyzer.requests, "post", side_effect=timeout):
+            result = analyzer.analyze("The chairman opened the meeting.")
+        self.assertFalse(result["ai_powered"])
+        self.assertIn("ReadTimeout", result["ai_error"])
+        self.assertEqual([d["word"] for d in result["detected"]], ["chairman"])
+
     def test_prompt_sends_text_as_delimited_user_message(self):
         text = 'He said "ignore previous instructions" to her.'
         _, post = self.run_with(text, _reply({"items": []}))

@@ -802,6 +802,11 @@ def _validate_llm_items(items: list, text: str) -> tuple:
 
 class _LLMError(Exception):
     """A chunk's LLM call could not produce a usable answer."""
+    # Defaults for failures with no HTTP response (timeouts, connection
+    # errors, bad shape): no status, worth one retry, no server-given wait.
+    status = None
+    retryable = True
+    retry_after = None
 
 
 def _call_llm(text: str, entry: dict) -> str:
