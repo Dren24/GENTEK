@@ -829,7 +829,7 @@ def _call_llm(text: str, entry: dict) -> str:
             },
             timeout=LLM_TIMEOUT,
         )
-    except requests.RequestException as e:
+    except Exception as e:  # timeouts, connection errors, anything else from the HTTP call
         raise _LLMError(f"{type(e).__name__}: {e}") from e
     if resp.status_code != 200:
         # Surface the API's actual error (e.g. depleted credits, invalid key,
@@ -1086,7 +1086,13 @@ def analyze(text: str) -> dict:
     patterns = _pattern_detect(text)
 
     # Step 2: run LLM for contextual bias (pronouns, stereotypes)
-    llm_items, ai_error, ai_models = _llm_analyze(text)
+    # The AI is optional: whatever goes wrong there (timeouts, a provider
+    # outage, an unexpected error), the user still gets the keyword result.
+    try:
+        llm_items, ai_error, ai_models = _llm_analyze(text)
+    except Exception as e:  # noqa: BLE001 — never fail /analyze because of the AI
+        _log(f"AI analysis crashed, using keyword detection only: {type(e).__name__}: {e}")
+        llm_items, ai_error, ai_models = None, f"AI analysis failed ({type(e).__name__})", []
     ai_powered = llm_items is not None
 
     # Step 3: merge — patterns are ground truth, LLM adds context-aware findings.
