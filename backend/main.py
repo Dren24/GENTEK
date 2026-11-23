@@ -148,6 +148,9 @@ if os.path.isdir(DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST, "assets")), name="assets")
 
     # ── Catch-all: serve index.html for all client-side React routes ──────────
+    # "no-cache" makes browsers re-check index.html on every visit, so after a
+    # deploy everyone gets the new version instead of an old saved copy. The
+    # files in /assets have a new name each build, so they can still be cached.
     @app.get("/{full_path:path}")
     def serve_react(full_path: str):
-        return FileResponse(os.path.join(DIST, "index.html"))
+        return FileResponse(os.path.join(DIST, "index.html"), headers={"Cache-Control": "no-cache"})
