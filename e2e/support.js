@@ -5,7 +5,8 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
-export const TEST_USER = { email: 'premiumtest@gentek.local', password: 'PremiumTest123!' }
+export const TEST_USER = { email: 'premiumtest@gentek.local', password: 'PremiumTest123!' }   // Premium
+export const FREE_USER = { email: 'freetest@gentek.local', password: 'FreeTest123!' }         // Free plan
 
 // Windows uses "python", Mac uses "python3". Set PYTHON=... to override.
 const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')
@@ -14,9 +15,9 @@ const testAccount = (...args) =>
 
 // Precondition: this browser was trusted before (the user ticked "Remember me"
 // on an earlier login), so login goes straight in without the emailed code.
-export async function trustBrowser(page) {
+export async function trustBrowser(page, email = TEST_USER.email) {
   const token = randomBytes(24).toString('hex')
-  testAccount('trust', token)
+  testAccount('trust', token, email)
   await page.goto('/')
   await page.evaluate((t) => { localStorage.clear(); localStorage.setItem('gentek-device', t) }, token)
 }
@@ -29,7 +30,7 @@ export async function openLogin(page) {
 }
 
 export async function signIn(page, email = TEST_USER.email, password = TEST_USER.password) {
-  await trustBrowser(page)
+  await trustBrowser(page, email)
   await page.reload()
   await page.getByRole('button', { name: 'Log in' }).first().click()
   const modal = page.getByRole('dialog')
