@@ -151,6 +151,16 @@ if os.path.isdir(DIST):
     # "no-cache" makes browsers re-check index.html on every visit, so after a
     # deploy everyone gets the new version instead of an old saved copy. The
     # files in /assets have a new name each build, so they can still be cached.
+    # Real files at the top of dist/ (favicon.svg, the logo, …) are sent as
+    # themselves — otherwise the browser gets index.html for /favicon.svg and
+    # shows a blank globe in the tab. realpath + the prefix check keep a path
+    # like /../backend/.env from ever leaving dist/.
+    _DIST_ROOT = os.path.realpath(DIST)
+
     @app.get("/{full_path:path}")
     def serve_react(full_path: str):
+        if full_path:
+            candidate = os.path.realpath(os.path.join(_DIST_ROOT, full_path))
+            if candidate.startswith(_DIST_ROOT + os.sep) and os.path.isfile(candidate):
+                return FileResponse(candidate)
         return FileResponse(os.path.join(DIST, "index.html"), headers={"Cache-Control": "no-cache"})
